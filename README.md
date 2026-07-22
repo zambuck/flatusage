@@ -141,3 +141,6 @@ The most important section with total comparable costs.
   config — it doesn't include solar feed-in credits, discounts, GST
   treatment, or other bill line items. Treat it as a like-for-like usage
   cost comparison tool, not a full bill replica.
+- If you are actively comparing fixed-rate vs time-of-use plans you should always
+  remember that you have a degree of control over some load such as washing machines
+  and dishwashers so your future usage may be different based on a new ToU plan.
