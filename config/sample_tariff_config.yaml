@@ -1,42 +1,33 @@
-plan_name: "AGL NEW Night Saver EV Combined E1/E2 Plan"
+plan_name: "AGL NEW Night Saver EV Actual E1 TOU tariff"
+daily_supply_charge_dollars: 1.666203
 
-registers:
-  E1:
-    label: "General Usage"
-    daily_supply_charge_dollars: 1.666203
-    periods:
-      - name: high_season_peak
-        months: [Nov, Dec, Jan, Feb, Mar]
-        days: weekday
-        windows:
-          - { start: "4pm", end: "8pm" }
-        rate: 0.419144
+periods:
+  - name: high_season_peak
+    months: [Nov, Dec, Jan, Feb, Mar]
+    days: weekday
+    windows:
+      - { start: "4pm", end: "8pm" }
+    rate: 0.419144
 
-      - name: low_season_peak
-        months: [Apr, May, Jun, Jul, Aug, Sep, Oct]
-        days: weekday
-        windows:
-          - { start: "4pm", end: "8pm" }
-        rate: 0.424237
+  - name: low_season_peak
+    months: [Apr, May, Jun, Jul, Aug, Sep, Oct]
+    days: weekday
+    windows:
+      - { start: "4pm", end: "8pm" }
+    rate: 0.424237
 
-      - name: solar_soak
-        months: [all]
-        days: all
-        windows:
-          - { start: "10am", end: "2pm" }
-        rate: 0.111133
+  - name: solar_soak
+    months: [all]
+    days: all
+    windows:
+      - { start: "10am", end: "2pm" }
+    rate: 0.111133
 
-      - name: EV
-        months: [all]
-        days: all
-        windows:
-          - { start: "12am", end: "6am" }
-        rate: 0.0799997
+  - name: EV
+    months: [all]
+    days: all
+    windows:
+      - { start: "12am", end: "6am" }
+    rate: 0.0799997
 
-    default_rate: 0.321211
-
-  E2:
-    label: "Controlled Load"
-    daily_supply_charge_dollars: 0.12496
-    periods: []
-    default_rate: 0.18579
+default_rate: 0.321211
