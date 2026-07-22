@@ -1,0 +1,10 @@
+{
+  "_comment": "Controlled load (E2 / CL1) tariff - flat rate all day, no TOU windows.",
+  "plan_name": "Actual CL1 tariff",
+
+  "periods": [],
+
+  "default_rate": 0.18579,
+
+  "daily_supply_charge_dollars": 0.12496
+}
