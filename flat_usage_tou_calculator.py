@@ -7,6 +7,11 @@ Parses the retailer-portal "MyUsageData" flat CSV export (one row per
 defined in a YAML config, so you can see what your historical usage would
 have cost under that tariff.
 
+The YAML config may describe either:
+  - a single tariff applied to the selected register(s), or
+  - a combined tariff with separate rates/supply charges per register
+    under a top-level 'registers:' block.
+
 Expected CSV columns include:
 
     AccountNumber,NMI,DeviceNumber,DeviceType,RegisterCode,
@@ -15,20 +20,44 @@ Expected CSV columns include:
 
 Usage
 -----
-    python3 flat_usage_tou_calculator.py MyUsageData.csv tariff_config.yaml \
+    # Single-register config
+    python3 flat_usage_tou_calculator.py MyUsageData.yaml tariff_config.yaml \
         --register E1 \
+        --out-summary summary.csv \
+        --out-detail detail.csv
+
+    # Combined config - produces both E1 and E2 results by default
+    python3 flat_usage_tou_calculator.py MyUsageData.yaml combined_tariff.yaml \
         --out-summary summary.csv \
         --out-detail detail.csv
 """
 
 import argparse
 import csv
+import os
 import re
 import sys
 from collections import defaultdict
 from datetime import datetime, date, time as dtime
 
 import yaml
+
+# ---------------------------------------------------------------------------
+# REGISTER LABELS
+# ---------------------------------------------------------------------------
+
+REGISTER_LABELS = {
+    "E1": "General Usage",
+    "E2": "Controlled Load",
+    "B1": "Solar Export",
+}
+
+
+def register_label(register, register_config=None):
+    if register_config and "label" in register_config:
+        return register_config["label"]
+    return REGISTER_LABELS.get(register, register)
+
 
 # ---------------------------------------------------------------------------
 # TARIFF ENGINE
@@ -65,7 +94,6 @@ def parse_hhmm(s):
         "16:00", "16"
     """
     raw = s.strip().lower().replace(" ", "")
-    # 12-hour with optional minutes and am/pm
     m = re.match(r"(\d{1,2})(?::(\d{2}))?(?:\.(\d{2}))?(am|pm)$", raw)
     if m:
         hour = int(m.group(1))
@@ -76,7 +104,6 @@ def parse_hhmm(s):
         elif suffix == "pm":
             hour += 12
         return dtime(hour, minute)
-    # 24-hour with optional minutes
     m = re.match(r"(\d{1,2})(?::(\d{2}))?$", raw)
     if m:
         return dtime(int(m.group(1)), int(m.group(2) or "0"))
@@ -125,19 +152,17 @@ def classify_interval(d: date, t: dtime, tariff):
     Return the tariff period name and rate for a given date+time.
     Rules are checked in order; first match wins.
     """
-    weekday = d.weekday()  # 0=Mon .. 6=Sun
+    weekday = d.weekday()
     is_weekend = weekday >= 5
     month = d.month
 
     for period in tariff.get("periods", []):
-        # day-type filter
-        day_type = period.get("days", "all")  # all | weekday | weekend
+        day_type = period.get("days", "all")
         if day_type == "weekday" and is_weekend:
             continue
         if day_type == "weekend" and not is_weekend:
             continue
 
-        # month/season filter
         months = _parse_months(period.get("months"))
         if months is not None and month not in months:
             continue
@@ -206,6 +231,45 @@ def apply_tariff(records, tariff, register_filter=None):
             monthly[m_key]["cost"] += charge * n_days_in_month
 
     return detail, summary, daily, monthly, supply_charge_total
+
+
+# ---------------------------------------------------------------------------
+# COMBINED CONFIG HELPERS
+# ---------------------------------------------------------------------------
+
+def is_combined_tariff(tariff):
+    return isinstance(tariff.get("registers"), dict)
+
+
+def get_register_tariff(tariff, register):
+    """Return the single-register tariff dict for a register from a combined config."""
+    if not is_combined_tariff(tariff):
+        return tariff
+
+    register_config = tariff["registers"].get(register)
+    if register_config is None:
+        raise ValueError(
+            f"Register '{register}' not defined in combined tariff config. "
+            f"Available registers: {', '.join(sorted(tariff['registers'].keys()))}"
+        )
+
+    single = dict(register_config)
+    single.setdefault("periods", [])
+    plan_name = tariff.get("plan_name", "(unnamed plan)")
+    label = register_label(register, register_config)
+    single["plan_name"] = f"{plan_name} — {label} ({register})"
+    return single
+
+
+def suffix_output_path(path, register):
+    """Insert _{register} before the file extension, unless already present."""
+    if path is None:
+        return None
+    base, ext = os.path.splitext(path)
+    suffix = f"_{register}"
+    if base.endswith(suffix):
+        return path
+    return f"{base}{suffix}{ext}"
 
 
 # ---------------------------------------------------------------------------
@@ -399,6 +463,8 @@ def print_console_summary(tariff, summary, monthly, supply_charge_total):
         print(f"  Grand total:    ${total_cost:.2f}")
     print()
 
+    return total_kwh, total_cost, supply_charge_total
+
 
 # ---------------------------------------------------------------------------
 # MAIN
@@ -410,7 +476,8 @@ def main():
     ap.add_argument("tariff_config", help="Path to a YAML file describing the TOU tariff")
     ap.add_argument("--register", default=None,
                     help="Only include this register (e.g. E1 for general usage, E2 for controlled load). "
-                         "Default: include all registers found in the file.")
+                         "If a combined tariff config is used and this is omitted, every register "
+                         "defined in the config is processed.")
     ap.add_argument("--out-detail", default=None, help="Write per-interval detail to this CSV path")
     ap.add_argument("--out-summary", default=None, help="Write period/monthly summary to this CSV path")
     args = ap.parse_args()
@@ -425,43 +492,126 @@ def main():
         print("No interval records found in the file.", file=sys.stderr)
         sys.exit(1)
 
-    registers_found = sorted(set(r["register"] for r in records))
-    if args.register and args.register not in registers_found:
-        print(f"Register '{args.register}' not found. Registers in file: {registers_found}", file=sys.stderr)
-        sys.exit(1)
-
     try:
         tariff = load_tariff(args.tariff_config)
     except Exception as e:
         print(f"Error loading tariff config: {e}", file=sys.stderr)
         sys.exit(1)
 
-    detail, summary, daily, monthly, supply_charge_total = apply_tariff(
-        records, tariff, register_filter=args.register
-    )
+    file_registers = sorted(set(r["register"] for r in records))
+    combined_mode = is_combined_tariff(tariff)
 
-    substituted = sum(1 for r in detail if r["quality"] != "A")
-    if substituted:
-        pct = 100 * substituted / len(detail)
-        print(f"Note: {substituted} of {len(detail)} intervals ({pct:.1f}%) are substituted/estimated, not measured.",
-              file=sys.stderr)
+    # Determine which registers to process
+    if combined_mode:
+        config_registers = set(tariff["registers"].keys())
 
-    filtered_dates = sorted({r["date"] for r in detail})
-    print(f"Parsed {len(records)} total intervals; {len(detail)} used after filtering.")
-    print(f"Data spans {filtered_dates[0]} to {filtered_dates[-1]} ({len(daily)} days with data).")
-    print(f"Registers found in file: {registers_found}")
-    if args.register:
+        if args.register:
+            if args.register not in config_registers:
+                print(
+                    f"Register '{args.register}' not defined in combined tariff config. "
+                    f"Available registers: {', '.join(sorted(config_registers))}",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+            if args.register not in file_registers:
+                print(
+                    f"Register '{args.register}' not found in usage file. "
+                    f"Registers in file: {file_registers}",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+            target_registers = [args.register]
+        else:
+            target_registers = sorted(config_registers & set(file_registers))
+            missing_in_file = config_registers - set(file_registers)
+            if missing_in_file:
+                print(
+                    f"Warning: registers defined in config but not found in usage file: "
+                    f"{', '.join(sorted(missing_in_file))}",
+                    file=sys.stderr,
+                )
+            missing_in_config = set(file_registers) - config_registers
+            if missing_in_config:
+                print(
+                    f"Warning: registers in usage file but not defined in config (skipped): "
+                    f"{', '.join(sorted(missing_in_config))}",
+                    file=sys.stderr,
+                )
+
+        if not target_registers:
+            print("No registers from the combined config are present in the usage file.", file=sys.stderr)
+            sys.exit(1)
+    else:
+        if args.register and args.register not in file_registers:
+            print(f"Register '{args.register}' not found. Registers in file: {file_registers}", file=sys.stderr)
+            sys.exit(1)
+        target_registers = [args.register] if args.register else file_registers
+
+    print(f"Registers found in file: {file_registers}")
+    if combined_mode:
+        print(f"Combined tariff config - processing registers: {target_registers}")
+    elif args.register:
         print(f"Filtered to register: {args.register}")
 
-    print_console_summary(tariff, summary, monthly, supply_charge_total)
+    # Process each target register
+    combined_kwh = 0.0
+    combined_usage_cost = 0.0
+    combined_supply_charge = 0.0
 
-    if args.out_detail:
-        write_detail_csv(args.out_detail, detail)
-        print(f"Wrote per-interval detail to {args.out_detail}")
+    for register in target_registers:
+        register_tariff = get_register_tariff(tariff, register)
+        label = register_label(register, tariff["registers"].get(register) if combined_mode else None)
 
-    if args.out_summary:
-        write_summary_csv(args.out_summary, tariff, summary, monthly, supply_charge_total)
-        print(f"Wrote summary to {args.out_summary}")
+        detail, summary, daily, monthly, supply_charge_total = apply_tariff(
+            records, register_tariff, register_filter=register
+        )
+
+        substituted = sum(1 for r in detail if r["quality"] != "A")
+        if substituted:
+            pct = 100 * substituted / len(detail)
+            print(
+                f"Note for {register}: {substituted} of {len(detail)} intervals ({pct:.1f}%) "
+                f"are substituted/estimated, not measured.",
+                file=sys.stderr,
+            )
+
+        filtered_dates = sorted({r["date"] for r in detail})
+        print(f"\n{'='*60}")
+        print(f"Register: {register} — {label}")
+        print(f"{'='*60}")
+        print(f"  Intervals used: {len(detail)}")
+        print(f"  Days with data: {len(daily)} ({filtered_dates[0]} to {filtered_dates[-1]})")
+
+        total_kwh, total_cost, supply = print_console_summary(
+            register_tariff, summary, monthly, supply_charge_total
+        )
+
+        combined_kwh += total_kwh
+        combined_usage_cost += total_cost
+        combined_supply_charge += supply
+
+        # Output files: suffix with register when multiple registers are processed
+        use_suffix = len(target_registers) > 1
+        out_detail = suffix_output_path(args.out_detail, register) if use_suffix else args.out_detail
+        out_summary = suffix_output_path(args.out_summary, register) if use_suffix else args.out_summary
+
+        if out_detail:
+            write_detail_csv(out_detail, detail)
+            print(f"Wrote per-interval detail to {out_detail}")
+
+        if out_summary:
+            write_summary_csv(out_summary, register_tariff, summary, monthly, supply_charge_total)
+            print(f"Wrote summary to {out_summary}")
+
+    # Combined totals when more than one register was processed
+    if len(target_registers) > 1:
+        print(f"\n{'='*60}")
+        print("Combined totals across all processed registers")
+        print(f"{'='*60}")
+        print(f"  Usage:          {combined_kwh:.2f} kWh")
+        print(f"  Usage cost:     ${combined_usage_cost:.2f}")
+        print(f"  Supply charge:  ${combined_supply_charge:.2f}")
+        print(f"  Grand total:    ${combined_usage_cost + combined_supply_charge:.2f}")
 
 
 if __name__ == "__main__":
