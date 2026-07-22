@@ -144,3 +144,25 @@ The most important section with total comparable costs.
 - If you are actively comparing fixed-rate vs time-of-use plans you should always
   remember that you have a degree of control over some load such as washing machines
   and dishwashers so your future usage may be different based on a new ToU plan.
+
+## Redact Usage Data
+
+If there's ever a reason to share or upload your usage data you'll want to redact the sensitive fields before it leaves your hands.
+
+How it works:
+
+Redacts by default: AccountNumber, NMI, DeviceNumber — the fields that identify a customer or premises. Everything else (device type, register code, rate type, timestamps, usage readings, quality flag) stays untouched since that's just the consumption data.
+
+Two modes:
+
+--mode hash (default): replaces each value with a deterministic pseudonym like ACCO_191760fa28. Same real value → same pseudonym, so you can still tell which rows belong to the same account/meter without exposing the real numbers. Use --salt yoursalt to get reproducible output across runs (otherwise a random salt is used and printed to stderr each time).
+
+--mode mask: keeps the last 4 characters and blanks the rest with X, e.g. XXXXXX1231.
+
+Usage:
+```
+python redact_usage_data.py input.csv output.csv
+python redact_usage_data.py input.csv output.csv --mode mask
+python redact_usage_data.py input.csv output.csv --fields AccountNumber NMI
+```
+You can pass --fields to redact a different set of columns if a future export from the retailer uses different header names or you want to redact more/fewer fields.
