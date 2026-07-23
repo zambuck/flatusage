@@ -261,8 +261,8 @@ Two modes:
 
 Usage:
 ```
-python redact_usage_data.py input.csv output.csv
-python redact_usage_data.py input.csv output.csv --mode mask
-python redact_usage_data.py input.csv output.csv --fields AccountNumber NMI
+python3 redact_data_usage.py input.csv output.csv
+python3 redact_data_usage.py input.csv output.csv --mode mask
+python3 redact_data_usage.py input.csv output.csv --fields AccountNumber NMI
 ```
 You can pass --fields to redact a different set of columns if a future export from the retailer uses different header names or you want to redact more/fewer fields.
