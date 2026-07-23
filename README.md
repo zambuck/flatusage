@@ -164,7 +164,7 @@ python3 flat_usage_tou_calculator.py your_usage.csv config/your_tariff_config.ya
 Leave off --register and the script will process every register defined in the combined config that is also present in your usage file:
 
 ```
-python3 flat_usage_tou_calculator.py your_usage.csv config/your_tariff_config.yaml \
+python3 flat_usage_tou_calculator.py data/sampledata-21-05-2026 config/sample_combined_config.yaml \
     --out-detail output/detail.csv \
     --out-summary output/summary.csv
 ```
