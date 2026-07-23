@@ -60,6 +60,20 @@ def register_label(register, register_config=None):
 
 
 # ---------------------------------------------------------------------------
+# FORMATTING HELPERS
+# ---------------------------------------------------------------------------
+
+def fmt_num(value, decimals=2):
+    """Format a number with comma-delimited thousands and fixed decimals."""
+    return f"{value:,.{decimals}f}"
+
+
+def fmt_int(value):
+    """Format an integer with comma-delimited thousands."""
+    return f"{value:,}"
+
+
+# ---------------------------------------------------------------------------
 # TARIFF ENGINE
 # ---------------------------------------------------------------------------
 
@@ -379,7 +393,8 @@ def write_detail_csv(path, detail):
         for r in detail:
             w.writerow([
                 r["nmi"], r["register"], r["date"].isoformat(), r["time"].strftime("%H:%M"),
-                f"{r['kwh']:.4f}", r["quality"], r["period"], f"{r['rate']:.4f}", f"{r['cost']:.4f}"
+                fmt_num(r["kwh"], 4), r["quality"], r["period"],
+                fmt_num(r["rate"], 4), fmt_num(r["cost"], 4)
             ])
 
 
@@ -395,9 +410,9 @@ def write_summary_csv(path, tariff, summary, monthly, supply_charge_total):
         w.writerow(["-- TOU rate structure --"])
         w.writerow(["period", "days", "months", "time_window(s)", "rate_dollars_per_kwh"])
         for row in period_rows:
-            w.writerow([row["name"], row["days"], row["months"], row["windows"], f"{row['rate']:.4f}"])
+            w.writerow([row["name"], row["days"], row["months"], row["windows"], fmt_num(row["rate"], 4)])
         if tariff.get("daily_supply_charge_dollars"):
-            w.writerow(["daily_supply_charge", "", "", "per day", f"{tariff['daily_supply_charge_dollars']:.4f}"])
+            w.writerow(["daily_supply_charge", "", "", "per day", fmt_num(tariff["daily_supply_charge_dollars"], 4)])
         w.writerow([])
 
         w.writerow(["-- By TOU period (actual usage/cost) --"])
@@ -406,7 +421,7 @@ def write_summary_csv(path, tariff, summary, monthly, supply_charge_total):
         total_cost = 0.0
         for name, vals in sorted(summary.items()):
             avg_rate = vals["cost"] / vals["kwh"] if vals["kwh"] else 0
-            w.writerow([name, f"{vals['kwh']:.3f}", f"{vals['cost']:.2f}", f"{avg_rate:.4f}"])
+            w.writerow([name, fmt_num(vals["kwh"], 3), fmt_num(vals["cost"], 2), fmt_num(avg_rate, 4)])
             total_kwh += vals["kwh"]
             total_cost += vals["cost"]
         w.writerow([])
@@ -414,17 +429,17 @@ def write_summary_csv(path, tariff, summary, monthly, supply_charge_total):
         w.writerow(["-- By month --"])
         w.writerow(["month", "kwh", "cost_dollars"])
         for m, vals in sorted(monthly.items()):
-            w.writerow([m, f"{vals['kwh']:.3f}", f"{vals['cost']:.2f}"])
+            w.writerow([m, fmt_num(vals["kwh"], 3), fmt_num(vals["cost"], 2)])
         w.writerow([])
 
         w.writerow(["-- Totals --"])
-        w.writerow(["total_kwh", f"{total_kwh:.3f}"])
-        w.writerow(["total_usage_cost_dollars", f"{total_cost:.2f}"])
+        w.writerow(["total_kwh", fmt_num(total_kwh, 3)])
+        w.writerow(["total_usage_cost_dollars", fmt_num(total_cost, 2)])
         if supply_charge_total:
-            w.writerow(["total_supply_charge_dollars", f"{supply_charge_total:.2f}"])
-            w.writerow(["grand_total_dollars", f"{total_cost + supply_charge_total:.2f}"])
+            w.writerow(["total_supply_charge_dollars", fmt_num(supply_charge_total, 2)])
+            w.writerow(["grand_total_dollars", fmt_num(total_cost + supply_charge_total, 2)])
         else:
-            w.writerow(["grand_total_dollars", f"{total_cost:.2f}"])
+            w.writerow(["grand_total_dollars", fmt_num(total_cost, 2)])
 
 
 def print_console_summary(tariff, summary, monthly, supply_charge_total):
@@ -437,9 +452,9 @@ def print_console_summary(tariff, summary, monthly, supply_charge_total):
     for row in period_rows:
         days_str = row["days"]
         months_str = f", months {row['months']}" if row["months"] else ""
-        print(f"  {row['name']:12s}  {row['windows']:28s}  ({days_str}{months_str})   {row['rate']:.4f} $/kWh")
+        print(f"  {row['name']:12s}  {row['windows']:28s}  ({days_str}{months_str})   {fmt_num(row['rate'], 4)} $/kWh")
     if tariff.get("daily_supply_charge_dollars"):
-        print(f"  {'supply charge':12s}  {'per day':28s}  {'':16s}   {tariff['daily_supply_charge_dollars']:.4f} $/day")
+        print(f"  {'supply charge':12s}  {'per day':28s}  {'':16s}   {fmt_num(tariff['daily_supply_charge_dollars'], 4)} $/day")
 
     total_kwh = sum(v["kwh"] for v in summary.values())
     total_cost = sum(v["cost"] for v in summary.values())
@@ -447,20 +462,20 @@ def print_console_summary(tariff, summary, monthly, supply_charge_total):
     print("\n=== TOU cost breakdown (actual usage) ===")
     for name, vals in sorted(summary.items()):
         avg_rate = vals["cost"] / vals["kwh"] if vals["kwh"] else 0
-        print(f"  {name:12s}  {vals['kwh']:10.2f} kWh   ${vals['cost']:9.2f}   (avg {avg_rate:.4f} $/kWh)")
+        print(f"  {name:12s}  {fmt_num(vals['kwh'], 2):>12s} kWh   ${fmt_num(vals['cost'], 2):>10s}   (avg {fmt_num(avg_rate, 4)} $/kWh)")
 
     print("\n=== Monthly totals ===")
     for m, vals in sorted(monthly.items()):
-        print(f"  {m}   {vals['kwh']:10.2f} kWh   ${vals['cost']:9.2f}")
+        print(f"  {m}   {fmt_num(vals['kwh'], 2):>12s} kWh   ${fmt_num(vals['cost'], 2):>10s}")
 
     print("\n=== Totals ===")
-    print(f"  Usage:          {total_kwh:.2f} kWh")
-    print(f"  Usage cost:     ${total_cost:.2f}")
+    print(f"  Usage:          {fmt_num(total_kwh, 2)} kWh")
+    print(f"  Usage cost:     ${fmt_num(total_cost, 2)}")
     if supply_charge_total:
-        print(f"  Supply charge:  ${supply_charge_total:.2f}")
-        print(f"  Grand total:    ${total_cost + supply_charge_total:.2f}")
+        print(f"  Supply charge:  ${fmt_num(supply_charge_total, 2)}")
+        print(f"  Grand total:    ${fmt_num(total_cost + supply_charge_total, 2)}")
     else:
-        print(f"  Grand total:    ${total_cost:.2f}")
+        print(f"  Grand total:    ${fmt_num(total_cost, 2)}")
     print()
 
     return total_kwh, total_cost, supply_charge_total
@@ -570,7 +585,7 @@ def main():
         if substituted:
             pct = 100 * substituted / len(detail)
             print(
-                f"Note for {register}: {substituted} of {len(detail)} intervals ({pct:.1f}%) "
+                f"Note for {register}: {fmt_int(substituted)} of {fmt_int(len(detail))} intervals ({pct:.1f}%) "
                 f"are substituted/estimated, not measured.",
                 file=sys.stderr,
             )
@@ -579,8 +594,8 @@ def main():
         print(f"\n{'='*60}")
         print(f"Register: {register} — {label}")
         print(f"{'='*60}")
-        print(f"  Intervals used: {len(detail)}")
-        print(f"  Days with data: {len(daily)} ({filtered_dates[0]} to {filtered_dates[-1]})")
+        print(f"  Intervals used: {fmt_int(len(detail))}")
+        print(f"  Days with data: {fmt_int(len(daily))} ({filtered_dates[0]} to {filtered_dates[-1]})")
 
         total_kwh, total_cost, supply = print_console_summary(
             register_tariff, summary, monthly, supply_charge_total
@@ -608,10 +623,10 @@ def main():
         print(f"\n{'='*60}")
         print("Combined totals across all processed registers")
         print(f"{'='*60}")
-        print(f"  Usage:          {combined_kwh:.2f} kWh")
-        print(f"  Usage cost:     ${combined_usage_cost:.2f}")
-        print(f"  Supply charge:  ${combined_supply_charge:.2f}")
-        print(f"  Grand total:    ${combined_usage_cost + combined_supply_charge:.2f}")
+        print(f"  Usage:          {fmt_num(combined_kwh, 2)} kWh")
+        print(f"  Usage cost:     ${fmt_num(combined_usage_cost, 2)}")
+        print(f"  Supply charge:  ${fmt_num(combined_supply_charge, 2)}")
+        print(f"  Grand total:    ${fmt_num(combined_usage_cost + combined_supply_charge, 2)}")
 
 
 if __name__ == "__main__":
