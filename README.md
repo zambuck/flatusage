@@ -27,13 +27,13 @@ AccountNumber,NMI,DeviceNumber,DeviceType,RegisterCode,RateTypeDescription,Start
 
 If your existing plan has a controlled load or some other metered usage you may need to separate them out and report on them separately.
 In this example the RegisterType ends with E1 for General Usage records, and E2 for Controlled Load records. Note: The double-asterisks are to highlight the register numbers.
-
+```
 AccountNumber,NMI,DeviceNumber,DeviceType,RegisterCode,RateTypeDescription,StartDate,EndDate,ProfileReadValue,RegisterReadValue,QualityFlag
 
 1231231231,45645645645,000000000789789789,COMMS4D,12345#**E1**,Generalusage,21/05/2024 12:00:00 AM,21/05/2024 12:29:59 AM,0.3982,0,A
 
 1231231231,45645645645,000000000789789789,COMMS4D,12345#**E2**,Controlledload,21/05/2024 12:00:00 AM,21/05/2024 12:29:59 AM,0,0,A
-
+```
 Common registers:
 
 E1 — General import/consumption.
