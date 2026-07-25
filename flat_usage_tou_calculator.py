@@ -628,6 +628,29 @@ def main():
         print(f"  Supply charge:  ${fmt_num(combined_supply_charge, 2)}")
         print(f"  Grand total:    ${fmt_num(combined_usage_cost + combined_supply_charge, 2)}")
 
+def run_calculation(usage_csv: str, tariff_yaml: str, output_dir: str, register: str = None):
+    """
+    Programmatic entry point used by the web/Lambda container.
+    Runs the full calculator and writes output CSVs into output_dir.
+    """
+    import os
+
+    os.makedirs(output_dir, exist_ok=True)
+    argv = ["flat_usage_tou_calculator.py", usage_csv, tariff_yaml]
+    if register:
+        argv.extend(["--register", register])
+    argv.extend([
+        "--out-summary", os.path.join(output_dir, "summary.csv"),
+        "--out-detail", os.path.join(output_dir, "detail.csv"),
+    ])
+
+    old_argv = sys.argv
+    try:
+        sys.argv = argv
+        main()
+    finally:
+        sys.argv = old_argv
+
 
 if __name__ == "__main__":
     main()
