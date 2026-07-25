@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>flatusage TOU Calculator</title>
+  <style>
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+      max-width: 800px;
+      margin: 2rem auto;
+      padding: 0 1rem;
+      line-height: 1.5;
+    }
+    h1 { color: #1a1a1a; }
+    label {
+      display: block;
+      margin-top: 1.2rem;
+      font-weight: 500;
+    }
+    input[type="file"], input[type="text"] {
+      display: block;
+      margin-top: 0.3rem;
+      width: 100%;
+      max-width: 400px;
+    }
+    button {
+      margin-top: 1.5rem;
+      padding: 0.7rem 1.5rem;
+      font-size: 1rem;
+      cursor: pointer;
+    }
+    #spinner { display: none; margin-top: 1rem; color: #555; }
+    #console-output {
+      margin-top: 1.5rem;
+      background: #f6f8fa;
+      border: 1px solid #d0d7de;
+      border-radius: 6px;
+      padding: 1rem;
+      white-space: pre-wrap;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.9rem;
+      max-height: 600px;
+      overflow-y: auto;
+    }
+    #downloads { margin-top: 1rem; }
+    #downloads a {
+      display: inline-block;
+      margin: 0.4rem 0.6rem 0 0;
+      padding: 0.4rem 0.8rem;
+      background: #2ea44f;
+      color: white;
+      text-decoration: none;
+      border-radius: 4px;
+    }
+    .error { color: #cf222e; }
+  </style>
+</head>
+<body>
+  <h1>flatusage TOU Calculator</h1>
+
+  <form id="calcForm">
+    <label>
+      Usage CSV (e.g. MyUsageData.csv)
+      <input type="file" name="usage_csv" accept=".csv" required>
+    </label>
+
+    <label>
+      Tariff config YAML
+      <input type="file" name="tariff_yaml" accept=".yaml,.yml" required>
+    </label>
+
+    <label>
+      Register (optional — leave blank for combined E1/E2)
+      <input type="text" name="register" placeholder="E1">
+    </label>
+
+    <button type="submit">Calculate</button>
+    <div id="spinner">Running calculation… please wait.</div>
+  </form>
+
+  <div id="error"></div>
+  <div id="downloads"></div>
+  <div id="console-output" style="display: none;"></div>
+
+  <script>
+    const form = document.getElementById("calcForm");
+    const spinner = document.getElementById("spinner");
+    const errorDiv = document.getElementById("error");
+    const downloadsDiv = document.getElementById("downloads");
+    const outputDiv = document.getElementById("console-output");
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      errorDiv.innerHTML = "";
+      downloadsDiv.innerHTML = "";
+      outputDiv.style.display = "none";
+      outputDiv.textContent = "";
+      spinner.style.display = "block";
+
+      const formData = new FormData(form);
+
+      try {
+        const resp = await fetch("/calculate", { method: "POST", body: formData });
+        const data = await resp.json();
+
+        spinner.style.display = "none";
+
+        if (!resp.ok || data.error) {
+          errorDiv.innerHTML = `<p class="error">Error: ${data.error || "Unknown error"}</p>`;
+          if (data.output) {
+            outputDiv.style.display = "block";
+            outputDiv.textContent = data.output;
+          }
+          return;
+        }
+
+        outputDiv.style.display = "block";
+        outputDiv.textContent = data.output;
+
+        if (data.files && data.files.length > 0) {
+          downloadsDiv.innerHTML = "<strong>Download results:</strong><br>";
+          data.files.forEach(filename => {
+            const a = document.createElement("a");
+            a.href = `/download/${data.job_id}/${filename}`;
+            a.download = filename;
+            a.textContent = filename;
+            downloadsDiv.appendChild(a);
+          });
+        }
+      } catch (err) {
+        spinner.style.display = "none";
+        errorDiv.innerHTML = `<p class="error">Error: ${err.message}</p>`;
+      }
+    });
+  </script>
+</body>
+</html>
