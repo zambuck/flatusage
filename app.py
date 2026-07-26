@@ -380,18 +380,21 @@ def clean_zip_name(filename):
     return f"{base}.zip"
 
 
-def build_comparison(result_a, result_b):
+def build_comparison(result_a, result_b, selected_register=None):
     rows = []
     for ta in result_a["summary_totals"]:
         for tb in result_b["summary_totals"]:
             if ta["summary_file"] == tb["summary_file"]:
-                register = (
-                    ta["summary_file"]
-                    .replace("summary", "")
-                    .replace(".csv", "")
-                    .strip("_")
-                    or "Total"
-                )
+                if selected_register:
+                    register = selected_register
+                else:
+                    register = (
+                        ta["summary_file"]
+                        .replace("summary", "")
+                        .replace(".csv", "")
+                        .strip("_")
+                        or "Total"
+                    )
                 cost_a = ta.get("grand_total_dollars", 0)
                 cost_b = tb.get("grand_total_dollars", 0)
                 diff = round(cost_b - cost_a, 2)
@@ -624,7 +627,7 @@ def calculate():
     comparison = []
     comparison_note = ""
     if len(results) == 2:
-        comparison = build_comparison(results[0], results[1])
+        comparison = build_comparison(results[0], results[1], selected_register=register)
         if not comparison:
             comparison_note = "Comparison could not be built: the two configs produced different register outputs."
 
