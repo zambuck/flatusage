@@ -1,0 +1,21 @@
+plan_name: "OLD Night Saver EV Combined E1/E2 Plan"
+
+registers:
+  E1:
+    label: "General Usage"
+    daily_supply_charge_dollars: 1.18393
+    periods:
+      - name: EV
+        months: [all]
+        days: all
+        windows:
+          - { start: "12am", end: "6am" }
+        rate: 0.08
+
+    default_rate: 0.36938
+
+  E2:
+    label: "Controlled Load"
+    daily_supply_charge_dollars: 0.08888
+    periods: []
+    default_rate: 0.27456
