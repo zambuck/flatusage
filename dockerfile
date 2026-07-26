@@ -19,5 +19,6 @@ EXPOSE 5000
 ENV JOBS_DIR=/tmp/flatusage-jobs
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV HOME=/tmp
+ENV FORCE_HTTPS=false
 
-CMD ["gunicorn", "-b", "0.0.0.0:5000", "--timeout", "120", "--workers", "2", "app:app"]
+CMD ["gunicorn", "-b", "0.0.0.0:5000", "--timeout", "120", "--workers", "1", "--log-level", "debug", "--worker-tmp-dir", "/tmp", "app:app"]
