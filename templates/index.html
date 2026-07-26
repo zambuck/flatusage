@@ -48,24 +48,24 @@
       margin-top: 1rem;
       color: #cf222e;
     }
-    #comparison {
+    .comparison {
       margin-top: 1.5rem;
       background: #f6f8fa;
       border: 1px solid #d0d7de;
       border-radius: 6px;
       padding: 1rem;
     }
-    #comparison table {
+    .comparison table {
       border-collapse: collapse;
       width: 100%;
       margin-top: 0.5rem;
     }
-    #comparison th, #comparison td {
+    .comparison th, .comparison td {
       border: 1px solid #d0d7de;
       padding: 0.5rem;
       text-align: left;
     }
-    #comparison th {
+    .comparison th {
       background: #eaeef2;
     }
     .cheaper { color: #1a7f37; font-weight: 600; }
@@ -78,6 +78,21 @@
     .config-block h3 {
       margin-top: 0;
     }
+    .downloads {
+      margin: 0.8rem 0;
+    }
+    .downloads a {
+      display: inline-block;
+      margin: 0.3rem 0.4rem 0 0;
+      padding: 0.4rem 0.8rem;
+      background: #2ea44f;
+      color: white;
+      text-decoration: none;
+      border-radius: 4px;
+    }
+    .downloads a.zip {
+      background: #0969da;
+    }
     .console-output {
       margin-top: 1rem;
       background: #f6f8fa;
@@ -89,15 +104,6 @@
       font-size: 0.85rem;
       max-height: 500px;
       overflow-y: auto;
-    }
-    #downloads a {
-      display: inline-block;
-      margin: 0.4rem 0.6rem 0 0;
-      padding: 0.4rem 0.8rem;
-      background: #2ea44f;
-      color: white;
-      text-decoration: none;
-      border-radius: 4px;
     }
   </style>
 </head>
@@ -133,7 +139,6 @@
   </form>
 
   <div id="error"></div>
-  <div id="comparison" style="display: none;"></div>
   <div id="results"></div>
 
   <script>
@@ -204,40 +209,57 @@
     const form = document.getElementById("calcForm");
     const spinner = document.getElementById("spinner");
     const errorDiv = document.getElementById("error");
-    const comparisonDiv = document.getElementById("comparison");
     const resultsDiv = document.getElementById("results");
 
     function fmtNum(n) {
       return n == null ? "-" : n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     }
 
-    function renderComparison(comparison) {
-      if (!comparison || comparison.length === 0) return;
-      let html = "<h3>Cost comparison</h3><table><tr><th>Register</th><th>Plan A</th><th>Plan B</th><th>kWh A</th><th>kWh B</th><th>Cost A</th><th>Cost B</th><th>Difference</th></tr>";
-      for (const row of comparison) {
-        const diffClass = row.cheaper === "a" ? "cheaper" : row.cheaper === "b" ? "cheaper" : "";
-        const diffSign = row.diff > 0 ? "+" : "";
-        html += `<tr>
-          <td>${row.register}</td>
-          <td>${row.plan_a}</td>
-          <td>${row.plan_b}</td>
-          <td>${fmtNum(row.kwh_a)}</td>
-          <td>${fmtNum(row.kwh_b)}</td>
-          <td>$${fmtNum(row.cost_a)}</td>
-          <td>$${fmtNum(row.cost_b)}</td>
-          <td class="${diffClass}">${diffSign}$${fmtNum(row.diff)}</td>
-        </tr>`;
+    function renderComparison(comparison, note) {
+      const div = document.createElement("div");
+      div.className = "comparison";
+      let html = "<h2>Cost comparison</h2>";
+      if (note) {
+        html += `<p style="color:#cf222e">${note}</p>`;
       }
-      html += "</table>";
-      comparisonDiv.innerHTML = html;
-      comparisonDiv.style.display = "block";
+      if (comparison.length === 0) {
+        html += "<p>No comparable register totals were found.</p>";
+      } else {
+        html += `<table>
+          <tr>
+            <th>Register</th>
+            <th>Plan A</th>
+            <th>Plan B</th>
+            <th>kWh A</th>
+            <th>kWh B</th>
+            <th>Cost A</th>
+            <th>Cost B</th>
+            <th>Difference</th>
+          </tr>`;
+        for (const row of comparison) {
+          const diffClass = row.cheaper === "a" ? "cheaper" : row.cheaper === "b" ? "cheaper" : "";
+          const diffSign = row.diff > 0 ? "+" : "";
+          const winner = row.cheaper === "a" ? "Plan A cheaper" : row.cheaper === "b" ? "Plan B cheaper" : "Same cost";
+          html += `<tr>
+            <td>${row.register}</td>
+            <td>${row.plan_a}</td>
+            <td>${row.plan_b}</td>
+            <td>${fmtNum(row.kwh_a)}</td>
+            <td>${fmtNum(row.kwh_b)}</td>
+            <td>$${fmtNum(row.cost_a)}</td>
+            <td>$${fmtNum(row.cost_b)}</td>
+            <td class="${diffClass}">${diffSign}$${fmtNum(row.diff)}<br><small>${winner}</small></td>
+          </tr>`;
+        }
+        html += "</table>";
+      }
+      div.innerHTML = html;
+      return div;
     }
 
     form.addEventListener("submit", async (e) => {
       e.preventDefault();
       errorDiv.innerHTML = "";
-      comparisonDiv.style.display = "none";
-      comparisonDiv.innerHTML = "";
       resultsDiv.innerHTML = "";
       spinner.style.display = "block";
 
@@ -257,21 +279,28 @@
           return;
         }
 
-        if (data.comparison && data.comparison.length > 0) {
-          renderComparison(data.comparison);
+        // Render comparison first (if present)
+        if (data.comparison || data.comparison_note) {
+          resultsDiv.appendChild(renderComparison(data.comparison || [], data.comparison_note));
         }
 
+        // Render each config block
         for (const cfg of data.configs) {
           const block = document.createElement("div");
           block.className = "config-block";
-          let html = `<h3>${cfg.label === "config1" ? "Plan A" : "Plan B"}: ${cfg.plan_name}</h3>`;
+          const title = cfg.label === "config1" ? "Plan A" : "Plan B";
+          let html = `<h3>${title}: ${cfg.plan_name}</h3>`;
+          html += `<div class="info">Config file: ${cfg.config_file}</div>`;
+
           if (cfg.files && cfg.files.length > 0) {
-            html += "<div><strong>Downloads:</strong> ";
+            html += `<div class="downloads">
+              <a class="zip" href="${cfg.zip_url}">Download all (${cfg.zip_name})</a>`;
             for (const f of cfg.files) {
-              html += `<a href="${f.download_url}" download="${f.display_name}">${f.filename}</a>`;
+              html += `<a href="${f.download_url}">${f.filename}</a>`;
             }
-            html += "</div>";
+            html += `</div>`;
           }
+
           html += `<div class="console-output">${cfg.output}</div>`;
           block.innerHTML = html;
           resultsDiv.appendChild(block);
