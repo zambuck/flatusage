@@ -266,7 +266,9 @@ The following command should be modified to suit your needs as follows:
 docker run --rm   -p 5000:5000   -e APP_USER=admin   -e APP_PASSWORD=change-me-now   -e DEBUG=true   flatusage-web:latest
 ```
 
-Once your container is running you should be able to connect with port 5000, specify the user/password then specify the usage datafile, and either one or two rate config files.
+Once your container is running you should be able to connect with port 5000, specify the user/password then specify the usage datafile, and either one or two rate config files. Uploading two rate configs will add a direct cost comparison by register. In this example that's the E1/General Usage and E2/Controlled Load 1 rates.
+
+<img width="912" height="340" alt="Screenshot 2026-07-26 at 16 26 47" src="https://github.com/user-attachments/assets/13b4cd71-2672-4ed3-b699-29b0648b6526" />
 
 
 ## Redact Usage Data
