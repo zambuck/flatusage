@@ -18,8 +18,18 @@ EXPOSE 5000
 
 ENV JOBS_DIR=/tmp/flatusage-jobs
 ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
 ENV HOME=/tmp
 ENV FORCE_HTTPS=false
 ENV DEBUG=false
 
-CMD ["gunicorn", "-b", "0.0.0.0:5000", "--timeout", "120", "--workers", "2", "--log-level", "info", "--worker-tmp-dir", "/tmp", "app:app"]
+CMD ["gunicorn", "-b", "0.0.0.0:5000", \
+     "--timeout", "180", \
+     "--workers", "2", \
+     "--threads", "4", \
+     "--worker-class", "gthread", \
+     "--worker-tmp-dir", "/tmp", \
+     "--access-logfile", "-", \
+     "--error-logfile", "-", \
+     "--log-level", "info", \
+     "app:app"]
