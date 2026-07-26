@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """
-Hardened Flask web front-end for the flatusage TOU calculator.
-Debug/hardening mode.
+Production-hardened Flask web front-end for the flatusage TOU calculator.
 """
 import csv
 import glob
@@ -29,13 +28,19 @@ from flask import (
 from flask_limiter import Limiter
 from flask_talisman import Talisman
 
+# ---------------------------------------------------------------------------
+# DEBUG CONFIG
+# ---------------------------------------------------------------------------
+
+DEBUG = os.environ.get("DEBUG", "false").lower() in ("1", "true", "yes")
+LOG_LEVEL = logging.DEBUG if DEBUG else logging.INFO
+
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 100 * 1024 * 1024
 app.config["PROPAGATE_EXCEPTIONS"] = False
 
-# Verbose logging
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=LOG_LEVEL,
     format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
 )
 logger = logging.getLogger("flatusage")
@@ -57,7 +62,6 @@ ALLOWED_EXTENSIONS = {
 }
 
 SAFE_NAME_RE = re.compile(r"^[a-zA-Z0-9._-]+$")
-SAFE_COMPONENT_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
 
 ALLOWED_TOP_KEYS = {
     "plan_name",
@@ -80,17 +84,20 @@ APP_USER = os.environ.get("APP_USER")
 APP_PASSWORD = os.environ.get("APP_PASSWORD")
 AUTH_ENABLED = bool(APP_USER and APP_PASSWORD)
 
-logger.info(f"AUTH_ENABLED={AUTH_ENABLED}, APP_USER={'set' if APP_USER else 'unset'}, APP_PASSWORD={'set' if APP_PASSWORD else 'unset'}")
+logger.info(
+    f"AUTH_ENABLED={AUTH_ENABLED}, "
+    f"APP_USER={'set' if APP_USER else 'unset'}, "
+    f"APP_PASSWORD={'set' if APP_PASSWORD else 'unset'}, "
+    f"DEBUG={DEBUG}"
+)
 
 
 def requires_auth(f):
     @wraps(f)
     def decorated(*args, **kwargs):
         if not AUTH_ENABLED:
-            logger.debug("Auth disabled, allowing request")
             return f(*args, **kwargs)
         auth = request.authorization
-        logger.debug(f"Request authorization: username={'present' if auth else 'missing'}")
         if not auth or auth.username != APP_USER or auth.password != APP_PASSWORD:
             logger.warning(f"Failed auth from {request.remote_addr}")
             return Response(
@@ -98,7 +105,6 @@ def requires_auth(f):
                 401,
                 {"WWW-Authenticate": 'Basic realm="flatusage"'},
             )
-        logger.debug(f"Auth success for user={auth.username}")
         return f(*args, **kwargs)
 
     return decorated
@@ -115,8 +121,9 @@ limiter = Limiter(
     storage_uri="memory://",
 )
 
+
 # ---------------------------------------------------------------------------
-# SECURITY HEADERS - HTTPS OFF BY DEFAULT FOR DEBUG
+# SECURITY HEADERS
 # ---------------------------------------------------------------------------
 
 force_https = os.environ.get("FORCE_HTTPS", "false").lower() in ("1", "true", "yes")
@@ -172,7 +179,6 @@ def validate_file_size(file_storage, max_bytes):
     file_storage.stream.seek(0, os.SEEK_END)
     size = file_storage.stream.tell()
     file_storage.stream.seek(0)
-    logger.debug(f"File size check: {size} bytes (max {max_bytes})")
     if size > max_bytes:
         raise ValueError(f"File too large: {size} bytes (max {max_bytes})")
     return size
@@ -181,7 +187,6 @@ def validate_file_size(file_storage, max_bytes):
 def validate_extension(filename, field):
     ext = os.path.splitext(filename)[1].lower()
     allowed = ALLOWED_EXTENSIONS.get(field, set())
-    logger.debug(f"Extension check for {field}: {ext} in {allowed}")
     if ext not in allowed:
         raise ValueError(
             f"Invalid file extension for {field}: {ext}. Allowed: {', '.join(allowed)}"
@@ -285,7 +290,8 @@ def cleanup_old_jobs():
         if entry.is_dir() and entry.stat().st_mtime < cutoff:
             shutil.rmtree(entry.path, ignore_errors=True)
             count += 1
-    logger.debug(f"Cleaned up {count} old job directories")
+    if DEBUG and count:
+        logger.debug(f"Cleaned up {count} old job directories")
 
 
 def create_job_dir():
@@ -317,7 +323,7 @@ def run_calculation_sandboxed(usage_csv, tariff_yaml, output_dir, register=None)
     env = os.environ.copy()
     env["PYTHONDONTWRITEBYTECODE"] = "1"
 
-    logger.info(f"Running calculator: {' '.join(cmd)}")
+    logger.info(f"Running calculator for job")
     result = subprocess.run(
         cmd,
         capture_output=True,
@@ -325,9 +331,8 @@ def run_calculation_sandboxed(usage_csv, tariff_yaml, output_dir, register=None)
         timeout=CALC_TIMEOUT_SECONDS,
         env=env,
     )
-    logger.debug(f"Calculator exit code: {result.returncode}")
     if result.stderr:
-        logger.debug(f"Calculator stderr: {result.stderr[:500]}")
+        logger.info(f"Calculator stderr: {result.stderr[:500]}")
     return result.stdout, result.stderr, result.returncode
 
 
@@ -404,24 +409,24 @@ def build_comparison(result_a, result_b):
 
 
 # ---------------------------------------------------------------------------
-# REQUEST LOGGING
+# REQUEST LOGGING (DEBUG ONLY)
 # ---------------------------------------------------------------------------
 
 
-@app.before_request
-def log_request():
-    logger.debug(
-        f"Request {request.method} {request.path} from {request.remote_addr}, "
-        f"auth={'present' if request.authorization else 'missing'}"
-    )
+if DEBUG:
 
+    @app.before_request
+    def log_request():
+        logger.debug(
+            f"Request {request.method} {request.path} from {request.remote_addr}"
+        )
 
-@app.after_request
-def log_response(response):
-    logger.debug(
-        f"Response {response.status_code} for {request.method} {request.path}"
-    )
-    return response
+    @app.after_request
+    def log_response(response):
+        logger.debug(
+            f"Response {response.status_code} for {request.method} {request.path}"
+        )
+        return response
 
 
 # ---------------------------------------------------------------------------
@@ -431,14 +436,12 @@ def log_response(response):
 
 @app.route("/health")
 def health():
-    logger.debug("Health check")
-    return jsonify({"status": "ok", "auth_enabled": AUTH_ENABLED})
+    return jsonify({"status": "ok", "auth_enabled": AUTH_ENABLED, "debug": DEBUG})
 
 
 @app.route("/")
 @requires_auth
 def index():
-    logger.debug("Serving index page")
     return render_template("index.html")
 
 
@@ -670,32 +673,4 @@ def download_zip(job_id, config_label):
         logger.warning(f"download-zip path traversal attempt: {config_dir}")
         return jsonify({"error": "Invalid path"}), 400
 
-    if not os.path.exists(config_dir):
-        return "Not found", 404
-
-    files = sorted(glob.glob(os.path.join(config_dir, "*.csv")))
-    if not files:
-        return "No results available", 404
-
-    zip_path = os.path.join(JOBS_DIR, job_id, f"{config_label}_bundle.zip")
-    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
-        for fpath in files:
-            zf.write(fpath, os.path.basename(fpath))
-
-    download_name = request.args.get("download_name") or f"{config_label}.zip"
-    return send_file(zip_path, as_attachment=True, download_name=download_name)
-
-
-@app.errorhandler(Exception)
-def handle_error(e):
-    logger.exception("Unhandled error")
-    return jsonify({"error": "An unexpected error occurred"}), 500
-
-
-@app.errorhandler(429)
-def handle_rate_limit(e):
-    return jsonify({"error": "Rate limit exceeded. Please slow down."}), 429
-
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=False)
+    if not os.path.exists_
