@@ -10,6 +10,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY flat_usage_tou_calculator.py .
 COPY app.py .
 COPY templates/ ./templates/
+COPY static/ ./static/
 
 RUN mkdir -p /tmp/flatusage-jobs && chown -R appuser:appuser /app /tmp/flatusage-jobs
 USER appuser
@@ -23,13 +24,4 @@ ENV HOME=/tmp
 ENV FORCE_HTTPS=false
 ENV DEBUG=false
 
-CMD ["gunicorn", "-b", "0.0.0.0:5000", \
-     "--timeout", "180", \
-     "--workers", "2", \
-     "--threads", "4", \
-     "--worker-class", "gthread", \
-     "--worker-tmp-dir", "/tmp", \
-     "--access-logfile", "-", \
-     "--error-logfile", "-", \
-     "--log-level", "info", \
-     "app:app"]
+CMD ["gunicorn", "-b", "0.0.0.0:5000", "--timeout", "180", "--workers", "2", "--threads", "4", "--worker-class", "gthread", "--worker-tmp-dir", "/tmp", "--log-level", "info", "app:app"]
