@@ -76,7 +76,6 @@ ALLOWED_REGISTER_KEYS = {"label", "daily_supply_charge_dollars", "periods", "def
 
 CSV_INJECTION_CHARS = ("=", "+", "-", "@", "\t", "\r")
 
-# Absolute path to the calculator script so it works regardless of cwd.
 CALCULATOR_SCRIPT = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "flat_usage_tou_calculator.py"
 )
@@ -108,7 +107,7 @@ def requires_auth(f):
             return Response(
                 "Authentication required",
                 401,
-                {"WWW-Authenticate": 'Basic realm="flatusage"'},
+                {"WWW-Authenticate": 'Basic realm="flatususe"'},
             )
         return f(*args, **kwargs)
 
@@ -517,7 +516,9 @@ def calculate():
     usage_file = request.files.get("usage_csv")
     tariff_file = request.files.get("tariff_yaml")
     tariff_2_file = request.files.get("tariff_yaml_2")
-    register = request.form.get("register", "").strip() or None
+
+    # Force the register value to uppercase.
+    register = request.form.get("register", "").strip().upper() or None
 
     if not usage_file or not tariff_file:
         logger.warning("calculate missing required files")
