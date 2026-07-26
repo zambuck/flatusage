@@ -7,7 +7,7 @@
   <style>
     body {
       font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
-      max-width: 800px;
+      max-width: 900px;
       margin: 2rem auto;
       padding: 0 1rem;
       line-height: 1.5;
@@ -22,7 +22,7 @@
       display: block;
       margin-top: 0.3rem;
       width: 100%;
-      max-width: 400px;
+      max-width: 420px;
     }
     button {
       margin-top: 1.5rem;
@@ -30,20 +30,66 @@
       font-size: 1rem;
       cursor: pointer;
     }
-    #spinner { display: none; margin-top: 1rem; color: #555; }
-    #console-output {
+    .info {
+      margin-top: 0.4rem;
+      color: #555;
+      font-size: 0.95rem;
+    }
+    .plan-name {
+      color: #0969da;
+      font-weight: 600;
+    }
+    #spinner {
+      display: none;
+      margin-top: 1rem;
+      color: #555;
+    }
+    #error {
+      margin-top: 1rem;
+      color: #cf222e;
+    }
+    #comparison {
       margin-top: 1.5rem;
+      background: #f6f8fa;
+      border: 1px solid #d0d7de;
+      border-radius: 6px;
+      padding: 1rem;
+    }
+    #comparison table {
+      border-collapse: collapse;
+      width: 100%;
+      margin-top: 0.5rem;
+    }
+    #comparison th, #comparison td {
+      border: 1px solid #d0d7de;
+      padding: 0.5rem;
+      text-align: left;
+    }
+    #comparison th {
+      background: #eaeef2;
+    }
+    .cheaper { color: #1a7f37; font-weight: 600; }
+    .config-block {
+      margin-top: 1.5rem;
+      border: 1px solid #d0d7de;
+      border-radius: 6px;
+      padding: 1rem;
+    }
+    .config-block h3 {
+      margin-top: 0;
+    }
+    .console-output {
+      margin-top: 1rem;
       background: #f6f8fa;
       border: 1px solid #d0d7de;
       border-radius: 6px;
       padding: 1rem;
       white-space: pre-wrap;
       font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-      font-size: 0.9rem;
-      max-height: 600px;
+      font-size: 0.85rem;
+      max-height: 500px;
       overflow-y: auto;
     }
-    #downloads { margin-top: 1rem; }
     #downloads a {
       display: inline-block;
       margin: 0.4rem 0.6rem 0 0;
@@ -53,7 +99,6 @@
       text-decoration: none;
       border-radius: 4px;
     }
-    .error { color: #cf222e; }
   </style>
 </head>
 <body>
@@ -62,13 +107,21 @@
   <form id="calcForm">
     <label>
       Usage CSV (e.g. MyUsageData.csv)
-      <input type="file" name="usage_csv" accept=".csv" required>
+      <input type="file" id="usageFile" name="usage_csv" accept=".csv" required>
     </label>
+    <div id="dateRange" class="info" style="display: none;"></div>
 
     <label>
       Tariff config YAML
-      <input type="file" name="tariff_yaml" accept=".yaml,.yml" required>
+      <input type="file" id="config1File" name="tariff_yaml" accept=".yaml,.yml" required>
     </label>
+    <div id="plan1" class="info" style="display: none;"></div>
+
+    <label>
+      Comparison tariff config YAML (optional)
+      <input type="file" id="config2File" name="tariff_yaml_2" accept=".yaml,.yml">
+    </label>
+    <div id="plan2" class="info" style="display: none;"></div>
 
     <label>
       Register (optional — leave blank for combined E1/E2)
@@ -80,22 +133,112 @@
   </form>
 
   <div id="error"></div>
-  <div id="downloads"></div>
-  <div id="console-output" style="display: none;"></div>
+  <div id="comparison" style="display: none;"></div>
+  <div id="results"></div>
 
   <script>
+    const usageFile = document.getElementById("usageFile");
+    const config1File = document.getElementById("config1File");
+    const config2File = document.getElementById("config2File");
+    const dateRangeDiv = document.getElementById("dateRange");
+    const plan1Div = document.getElementById("plan1");
+    const plan2Div = document.getElementById("plan2");
+
+    function formatDate(iso) {
+      const d = new Date(iso);
+      return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+    }
+
+    async function parseCsv(file) {
+      if (!file) return;
+      const formData = new FormData();
+      formData.append("usage_csv", file);
+      try {
+        const resp = await fetch("/parse-csv", { method: "POST", body: formData });
+        const data = await resp.json();
+        if (resp.ok) {
+          dateRangeDiv.style.display = "block";
+          dateRangeDiv.innerHTML = `Date range: <strong>${formatDate(data.start)}</strong> to <strong>${formatDate(data.end)}</strong> (${data.days} days)`;
+        } else {
+          dateRangeDiv.style.display = "block";
+          dateRangeDiv.innerHTML = `<span style="color:#cf222e">${data.error}</span>`;
+        }
+      } catch (err) {
+        dateRangeDiv.style.display = "block";
+        dateRangeDiv.innerHTML = `<span style="color:#cf222e">${err.message}</span>`;
+      }
+    }
+
+    async function parseConfig(file, div) {
+      if (!file) {
+        div.style.display = "none";
+        div.innerHTML = "";
+        return;
+      }
+      const formData = new FormData();
+      formData.append("tariff_yaml", file);
+      try {
+        const resp = await fetch("/parse-config", { method: "POST", body: formData });
+        const data = await resp.json();
+        if (resp.ok) {
+          div.style.display = "block";
+          let html = `Plan: <span class="plan-name">${data.plan_name}</span>`;
+          if (data.registers.length > 0) {
+            html += ` <em>(registers: ${data.registers.join(", ")})</em>`;
+          }
+          div.innerHTML = html;
+        } else {
+          div.style.display = "block";
+          div.innerHTML = `<span style="color:#cf222e">${data.error}</span>`;
+        }
+      } catch (err) {
+        div.style.display = "block";
+        div.innerHTML = `<span style="color:#cf222e">${err.message}</span>`;
+      }
+    }
+
+    usageFile.addEventListener("change", () => parseCsv(usageFile.files[0]));
+    config1File.addEventListener("change", () => parseConfig(config1File.files[0], plan1Div));
+    config2File.addEventListener("change", () => parseConfig(config2File.files[0], plan2Div));
+
     const form = document.getElementById("calcForm");
     const spinner = document.getElementById("spinner");
     const errorDiv = document.getElementById("error");
-    const downloadsDiv = document.getElementById("downloads");
-    const outputDiv = document.getElementById("console-output");
+    const comparisonDiv = document.getElementById("comparison");
+    const resultsDiv = document.getElementById("results");
+
+    function fmtNum(n) {
+      return n == null ? "-" : n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+
+    function renderComparison(comparison) {
+      if (!comparison || comparison.length === 0) return;
+      let html = "<h3>Cost comparison</h3><table><tr><th>Register</th><th>Plan A</th><th>Plan B</th><th>kWh A</th><th>kWh B</th><th>Cost A</th><th>Cost B</th><th>Difference</th></tr>";
+      for (const row of comparison) {
+        const diffClass = row.cheaper === "a" ? "cheaper" : row.cheaper === "b" ? "cheaper" : "";
+        const diffSign = row.diff > 0 ? "+" : "";
+        html += `<tr>
+          <td>${row.register}</td>
+          <td>${row.plan_a}</td>
+          <td>${row.plan_b}</td>
+          <td>${fmtNum(row.kwh_a)}</td>
+          <td>${fmtNum(row.kwh_b)}</td>
+          <td>$${fmtNum(row.cost_a)}</td>
+          <td>$${fmtNum(row.cost_b)}</td>
+          <td class="${diffClass}">${diffSign}$${fmtNum(row.diff)}</td>
+        </tr>`;
+      }
+      html += "</table>";
+      comparisonDiv.innerHTML = html;
+      comparisonDiv.style.display = "block";
+    }
 
     form.addEventListener("submit", async (e) => {
       e.preventDefault();
       errorDiv.innerHTML = "";
-      downloadsDiv.innerHTML = "";
-      outputDiv.style.display = "none";
-      outputDiv.textContent = "";
+      comparisonDiv.style.display = "none";
+      comparisonDiv.innerHTML = "";
+      resultsDiv.innerHTML = "";
       spinner.style.display = "block";
 
       const formData = new FormData(form);
@@ -107,30 +250,35 @@
         spinner.style.display = "none";
 
         if (!resp.ok || data.error) {
-          errorDiv.innerHTML = `<p class="error">Error: ${data.error || "Unknown error"}</p>`;
+          errorDiv.innerHTML = `Error: ${data.error || "Unknown error"}`;
           if (data.output) {
-            outputDiv.style.display = "block";
-            outputDiv.textContent = data.output;
+            resultsDiv.innerHTML = `<div class="console-output">${data.output}</div>`;
           }
           return;
         }
 
-        outputDiv.style.display = "block";
-        outputDiv.textContent = data.output;
+        if (data.comparison && data.comparison.length > 0) {
+          renderComparison(data.comparison);
+        }
 
-        if (data.files && data.files.length > 0) {
-          downloadsDiv.innerHTML = "<strong>Download results:</strong><br>";
-          data.files.forEach(filename => {
-            const a = document.createElement("a");
-            a.href = `/download/${data.job_id}/${filename}`;
-            a.download = filename;
-            a.textContent = filename;
-            downloadsDiv.appendChild(a);
-          });
+        for (const cfg of data.configs) {
+          const block = document.createElement("div");
+          block.className = "config-block";
+          let html = `<h3>${cfg.label === "config1" ? "Plan A" : "Plan B"}: ${cfg.plan_name}</h3>`;
+          if (cfg.files && cfg.files.length > 0) {
+            html += "<div><strong>Downloads:</strong> ";
+            for (const f of cfg.files) {
+              html += `<a href="${f.download_url}" download="${f.display_name}">${f.filename}</a>`;
+            }
+            html += "</div>";
+          }
+          html += `<div class="console-output">${cfg.output}</div>`;
+          block.innerHTML = html;
+          resultsDiv.appendChild(block);
         }
       } catch (err) {
         spinner.style.display = "none";
-        errorDiv.innerHTML = `<p class="error">Error: ${err.message}</p>`;
+        errorDiv.innerHTML = `Error: ${err.message}`;
       }
     });
   </script>
