@@ -307,11 +307,12 @@ def create_job_dir():
 # CALCULATOR EXECUTION
 # ---------------------------------------------------------------------------
 
+CALCULATOR_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "flat_usage_tou_calculator.py")
 
 def run_calculation_sandboxed(usage_csv, tariff_yaml, output_dir, register=None):
     cmd = [
         sys.executable,
-        "flat_usage_tou_calculator.py",
+        CALCULATOR_SCRIPT,
         usage_csv,
         tariff_yaml,
         "--out-summary", os.path.join(output_dir, "summary.csv"),
@@ -322,14 +323,16 @@ def run_calculation_sandboxed(usage_csv, tariff_yaml, output_dir, register=None)
 
     env = os.environ.copy()
     env["PYTHONDONTWRITEBYTECODE"] = "1"
+    env["PYTHONUNBUFFERED"] = "1"
 
-    logger.info(f"Running calculator for job")
+    logger.info(f"Running calculator: {' '.join(cmd)}")
     result = subprocess.run(
         cmd,
         capture_output=True,
         text=True,
         timeout=CALC_TIMEOUT_SECONDS,
         env=env,
+        cwd=os.path.dirname(CALCULATOR_SCRIPT),  # ensure working dir is app dir
     )
     if result.stderr:
         logger.info(f"Calculator stderr: {result.stderr[:500]}")
