@@ -24,6 +24,9 @@
       width: 100%;
       max-width: 420px;
     }
+    input[type="file"] {
+      font-size: 150%;
+    }
     button {
       margin-top: 1.5rem;
       padding: 0.7rem 1.5rem;
@@ -38,6 +41,14 @@
     .plan-name {
       color: #0969da;
       font-weight: 600;
+    }
+    .warning {
+      color: #9a6700;
+      background: #fff8c5;
+      border: 1px solid #eedf6b;
+      border-radius: 4px;
+      padding: 0.6rem 0.8rem;
+      margin-top: 0.4rem;
     }
     #spinner {
       display: none;
@@ -128,6 +139,7 @@
       <input type="file" id="config2File" name="tariff_yaml_2" accept=".yaml,.yml">
     </label>
     <div id="plan2" class="info" style="display: none;"></div>
+    <div id="dupWarning" style="display: none;"></div>
 
     <label>
       Register (optional — leave blank for combined E1/E2)
@@ -148,10 +160,36 @@
     const dateRangeDiv = document.getElementById("dateRange");
     const plan1Div = document.getElementById("plan1");
     const plan2Div = document.getElementById("plan2");
+    const dupWarningDiv = document.getElementById("dupWarning");
+
+    let config1Text = null;
+    let config2Text = null;
 
     function formatDate(iso) {
       const d = new Date(iso);
       return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+    }
+
+    async function readFileText(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject(reader.error);
+        reader.readAsText(file);
+      });
+    }
+
+    function checkDuplicateConfigs() {
+      if (config1Text && config2Text) {
+        if (config1Text === config2Text) {
+          dupWarningDiv.style.display = "block";
+          dupWarningDiv.className = "warning";
+          dupWarningDiv.textContent = "Warning: the two config files are identical. The comparison will show no cost difference.";
+        } else {
+          dupWarningDiv.style.display = "none";
+          dupWarningDiv.textContent = "";
+        }
+      }
     }
 
     async function parseCsv(file) {
@@ -174,12 +212,19 @@
       }
     }
 
-    async function parseConfig(file, div) {
+    async function parseConfig(file, div, storeTextRef) {
       if (!file) {
         div.style.display = "none";
         div.innerHTML = "";
+        if (storeTextRef === 1) config1Text = null;
+        if (storeTextRef === 2) config2Text = null;
+        checkDuplicateConfigs();
         return;
       }
+      const text = await readFileText(file);
+      if (storeTextRef === 1) config1Text = text;
+      if (storeTextRef === 2) config2Text = text;
+
       const formData = new FormData();
       formData.append("tariff_yaml", file);
       try {
@@ -200,11 +245,12 @@
         div.style.display = "block";
         div.innerHTML = `<span style="color:#cf222e">${err.message}</span>`;
       }
+      checkDuplicateConfigs();
     }
 
     usageFile.addEventListener("change", () => parseCsv(usageFile.files[0]));
-    config1File.addEventListener("change", () => parseConfig(config1File.files[0], plan1Div));
-    config2File.addEventListener("change", () => parseConfig(config2File.files[0], plan2Div));
+    config1File.addEventListener("change", () => parseConfig(config1File.files[0], plan1Div, 1));
+    config2File.addEventListener("change", () => parseConfig(config2File.files[0], plan2Div, 2));
 
     const form = document.getElementById("calcForm");
     const spinner = document.getElementById("spinner");
@@ -230,8 +276,7 @@
             <th>Register</th>
             <th>Plan A</th>
             <th>Plan B</th>
-            <th>kWh A</th>
-            <th>kWh B</th>
+            <th>kWh</th>
             <th>Cost A</th>
             <th>Cost B</th>
             <th>Difference</th>
@@ -244,8 +289,7 @@
             <td>${row.register}</td>
             <td>${row.plan_a}</td>
             <td>${row.plan_b}</td>
-            <td>${fmtNum(row.kwh_a)}</td>
-            <td>${fmtNum(row.kwh_b)}</td>
+            <td>${fmtNum(row.kwh)}</td>
             <td>$${fmtNum(row.cost_a)}</td>
             <td>$${fmtNum(row.cost_b)}</td>
             <td class="${diffClass}">${diffSign}$${fmtNum(row.diff)}<br><small>${winner}</small></td>
@@ -279,12 +323,10 @@
           return;
         }
 
-        // Render comparison first (if present)
         if (data.comparison || data.comparison_note) {
           resultsDiv.appendChild(renderComparison(data.comparison || [], data.comparison_note));
         }
 
-        // Render each config block
         for (const cfg of data.configs) {
           const block = document.createElement("div");
           block.className = "config-block";
