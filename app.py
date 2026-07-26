@@ -76,6 +76,11 @@ ALLOWED_REGISTER_KEYS = {"label", "daily_supply_charge_dollars", "periods", "def
 
 CSV_INJECTION_CHARS = ("=", "+", "-", "@", "\t", "\r")
 
+# Absolute path to the calculator script so it works regardless of cwd.
+CALCULATOR_SCRIPT = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "flat_usage_tou_calculator.py"
+)
+
 # ---------------------------------------------------------------------------
 # AUTHENTICATION
 # ---------------------------------------------------------------------------
@@ -307,9 +312,6 @@ def create_job_dir():
 # CALCULATOR EXECUTION
 # ---------------------------------------------------------------------------
 
-CALCULATOR_SCRIPT = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "flat_usage_tou_calculator.py"
-)
 
 def run_calculation_sandboxed(usage_csv, tariff_yaml, output_dir, register=None):
     cmd = [
@@ -334,10 +336,10 @@ def run_calculation_sandboxed(usage_csv, tariff_yaml, output_dir, register=None)
         text=True,
         timeout=CALC_TIMEOUT_SECONDS,
         env=env,
-        cwd=os.path.dirname(CALCULATOR_SCRIPT),  # ensure working dir is app dir
+        cwd=os.path.dirname(CALCULATOR_SCRIPT),
     )
     if result.stderr:
-        logger.info(f"Calculator stderr: {result.stderr[:500]}")
+        logger.info(f"Calculator stderr: {result.stderr[:2000]}")
     return result.stdout, result.stderr, result.returncode
 
 
