@@ -673,4 +673,32 @@ def download_zip(job_id, config_label):
         logger.warning(f"download-zip path traversal attempt: {config_dir}")
         return jsonify({"error": "Invalid path"}), 400
 
-    if not os.path.exists_
+    if not os.path.exists(config_dir):
+        return "Not found", 404
+
+    files = sorted(glob.glob(os.path.join(config_dir, "*.csv")))
+    if not files:
+        return "No results available", 404
+
+    zip_path = os.path.join(JOBS_DIR, job_id, f"{config_label}_bundle.zip")
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+        for fpath in files:
+            zf.write(fpath, os.path.basename(fpath))
+
+    download_name = request.args.get("download_name") or f"{config_label}.zip"
+    return send_file(zip_path, as_attachment=True, download_name=download_name)
+
+
+@app.errorhandler(Exception)
+def handle_error(e):
+    logger.exception("Unhandled error")
+    return jsonify({"error": "An unexpected error occurred"}), 500
+
+
+@app.errorhandler(429)
+def handle_rate_limit(e):
+    return jsonify({"error": "Rate limit exceeded. Please slow down."}), 429
+
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000, debug=DEBUG)
