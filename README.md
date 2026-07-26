@@ -245,6 +245,32 @@ This only calculates usage + supply charge costs from your tariff config — it 
 
 If you are actively comparing fixed-rate vs time-of-use plans you should always remember that you have a degree of control over some load such as washing machines and dishwashers, so your future usage may be different based on a new TOU plan.
 
+# Running as a Docker container
+
+If you would like to run the docker internally (it isn't yet security hardened) it will allow the optional comparison of two separate plans/configs across the one set of usage data.
+
+## Installation
+
+Download the code first and unzip if necessary. Create the docker image by running the following command from within the source folder:
+
+```
+docker build --no-cache -t flatusage-web:latest .
+```
+The following command should be modified to suit your needs as follows:
+ - The --rm will remove the container after running. Handy while initially troubleshooting
+ - The port being mapped here is 5000.
+ - A basic auth user named admin is being created
+ - A password for the auth user is being set to a very poor value.
+ - Debug mode is being enabled in case troubleshooting is needed.
+```
+docker run --rm   -p 5000:5000   -e APP_USER=admin   -e APP_PASSWORD=change-me-now   -e DEBUG=true   flatusage-web:latest
+```
+
+Once your container is running you should be able to connect with port 5000, specify the user/password then specify the usage datafile, and either one or two rate config files. Uploading two rate configs will add a direct cost comparison by register. In this example that's the E1/General Usage and E2/Controlled Load 1 rates.
+
+<img width="912" height="340" alt="Screenshot 2026-07-26 at 16 26 47" src="https://github.com/user-attachments/assets/13b4cd71-2672-4ed3-b699-29b0648b6526" />
+
+
 ## Redact Usage Data
 
 If there's ever a reason to share or upload your usage data you'll want to redact the sensitive fields before it leaves your hands.
