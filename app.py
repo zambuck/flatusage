@@ -307,7 +307,9 @@ def create_job_dir():
 # CALCULATOR EXECUTION
 # ---------------------------------------------------------------------------
 
-CALCULATOR_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "flat_usage_tou_calculator.py")
+CALCULATOR_SCRIPT = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "flat_usage_tou_calculator.py"
+)
 
 def run_calculation_sandboxed(usage_csv, tariff_yaml, output_dir, register=None):
     cmd = [
