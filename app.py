@@ -79,8 +79,7 @@ def build_comparison(result_a, result_b):
                         "register": register,
                         "plan_a": result_a["plan_name"],
                         "plan_b": result_b["plan_name"],
-                        "kwh_a": ta.get("total_kwh"),
-                        "kwh_b": tb.get("total_kwh"),
+                        "kwh": ta.get("total_kwh"),
                         "cost_a": cost_a,
                         "cost_b": cost_b,
                         "diff": diff,
@@ -245,48 +244,4 @@ def calculate():
     comparison = []
     comparison_note = ""
     if len(results) == 2:
-        comparison = build_comparison(results[0], results[1])
-        if not comparison:
-            comparison_note = "Comparison could not be built: the two configs produced different register outputs."
-
-    return jsonify(
-        {
-            "job_id": job_id,
-            "configs": results,
-            "comparison": comparison,
-            "comparison_note": comparison_note,
-        }
-    )
-
-
-@app.route("/download/<job_id>/<config_label>/<filename>")
-def download(job_id, config_label, filename):
-    filename = os.path.basename(filename)
-    file_path = os.path.join(JOBS_DIR, job_id, config_label, "output", filename)
-    if not os.path.exists(file_path):
-        return "File not found", 404
-    return send_file(file_path, as_attachment=True, download_name=filename)
-
-
-@app.route("/download-zip/<job_id>/<config_label>")
-def download_zip(job_id, config_label):
-    config_label = os.path.basename(config_label)
-    config_dir = os.path.join(JOBS_DIR, job_id, config_label, "output")
-    if not os.path.exists(config_dir):
-        return "Not found", 404
-
-    files = sorted(glob.glob(os.path.join(config_dir, "*.csv")))
-    if not files:
-        return "No results available", 404
-
-    zip_path = os.path.join(JOBS_DIR, job_id, f"{config_label}_bundle.zip")
-    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
-        for fpath in files:
-            zf.write(fpath, os.path.basename(fpath))
-
-    download_name = request.args.get("download_name") or f"{config_label}.zip"
-    return send_file(zip_path, as_attachment=True, download_name=download_name)
-
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
+        comparison = build_comparison(results[0], results[1])***_
