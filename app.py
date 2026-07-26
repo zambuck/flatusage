@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
+import csv
 import glob
 import io
 import os
 import sys
 import uuid
 
+import yaml
 from flask import Flask, render_template, request, send_file, jsonify
 
 import flat_usage_tou_calculator as calc
@@ -15,19 +17,142 @@ app.config["MAX_CONTENT_LENGTH"] = 100 * 1024 * 1024  # 100 MB max upload
 JOBS_DIR = os.environ.get("JOBS_DIR", "/tmp/flatusage-jobs")
 
 
+def parse_summary_totals(path):
+    """Read a summary CSV and return the numeric totals section."""
+    totals = {}
+    with open(path, newline="") as f:
+        reader = csv.reader(f)
+        in_totals = False
+        for row in reader:
+            if len(row) >= 2 and row[0] == "-- Totals --":
+                in_totals = True
+                continue
+            if in_totals and len(row) >= 2:
+                key, raw = row[0], row[1].replace(",", "")
+                if key in (
+                    "total_kwh",
+                    "total_usage_cost_dollars",
+                    "total_supply_charge_dollars",
+                    "grand_total_dollars",
+                ):
+                    try:
+                        totals[key] = float(raw)
+                    except ValueError:
+                        pass
+    return totals if totals else None
+
+
+def build_comparison(result_a, result_b):
+    """Build a side-by-side comparison of matching summary files."""
+    rows = []
+    for ta in result_a["summary_totals"]:
+        for tb in result_b["summary_totals"]:
+            if ta["summary_file"] == tb["summary_file"]:
+                register = (
+                    ta["summary_file"]
+                    .replace("summary", "")
+                    .replace(".csv", "")
+                    .strip("_")
+                    or "Total"
+                )
+                cost_a = ta.get("grand_total_dollars", 0)
+                cost_b = tb.get("grand_total_dollars", 0)
+                diff = round(cost_b - cost_a, 2)
+                rows.append(
+                    {
+                        "register": register,
+                        "plan_a": result_a["plan_name"],
+                        "plan_b": result_b["plan_name"],
+                        "kwh_a": ta.get("total_kwh"),
+                        "kwh_b": tb.get("total_kwh"),
+                        "cost_a": cost_a,
+                        "cost_b": cost_b,
+                        "diff": diff,
+                        "cheaper": (
+                            "b"
+                            if cost_b < cost_a
+                            else "a" if cost_a < cost_b else "same"
+                        ),
+                    }
+                )
+    return rows
+
+
 @app.route("/")
 def index():
     return render_template("index.html")
+
+
+@app.route("/parse-csv", methods=["POST"])
+def parse_csv():
+    """Return the date range covered by the uploaded usage CSV."""
+    file = request.files.get("usage_csv")
+    if not file:
+        return jsonify({"error": "No file uploaded"}), 400
+
+    try:
+        text = io.StringIO(file.stream.read().decode("utf-8-sig"))
+        reader = csv.DictReader(text)
+        if "StartDate" not in (reader.fieldnames or []):
+            return (
+                jsonify(
+                    {
+                        "error": f"Missing required column: StartDate. Found: {reader.fieldnames}"
+                    }
+                ),
+                400,
+            )
+
+        dates = set()
+        for row in reader:
+            if row.get("StartDate"):
+                dt = calc._parse_timestamp(row["StartDate"])
+                dates.add(dt.date())
+
+        if not dates:
+            return jsonify({"error": "No valid dates found in CSV"}), 400
+
+        return jsonify(
+            {
+                "start": min(dates).isoformat(),
+                "end": max(dates).isoformat(),
+                "days": len(dates),
+            }
+        )
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@app.route("/parse-config", methods=["POST"])
+def parse_config():
+    """Return the plan_name (and registers if combined) from an uploaded YAML."""
+    file = request.files.get("tariff_yaml")
+    if not file:
+        return jsonify({"error": "No file uploaded"}), 400
+
+    try:
+        content = file.stream.read().decode("utf-8")
+        data = yaml.safe_load(content) or {}
+        plan_name = data.get("plan_name", "(unnamed plan)")
+        registers = []
+        if isinstance(data.get("registers"), dict):
+            registers = sorted(data["registers"].keys())
+        return jsonify({"plan_name": plan_name, "registers": registers})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
 
 
 @app.route("/calculate", methods=["POST"])
 def calculate():
     usage_file = request.files.get("usage_csv")
     tariff_file = request.files.get("tariff_yaml")
+    tariff_2_file = request.files.get("tariff_yaml_2")
     register = request.form.get("register", "").strip() or None
 
     if not usage_file or not tariff_file:
-        return jsonify({"error": "Both a usage CSV and a tariff YAML are required."}), 400
+        return jsonify(
+            {"error": "Both a usage CSV and a tariff YAML are required."}
+        ), 400
 
     job_id = str(uuid.uuid4())
     job_dir = os.path.join(JOBS_DIR, job_id)
@@ -35,37 +160,90 @@ def calculate():
 
     usage_path = os.path.join(job_dir, "usage.csv")
     tariff_path = os.path.join(job_dir, "tariff.yaml")
-    output_dir = os.path.join(job_dir, "output")
-
     usage_file.save(usage_path)
     tariff_file.save(tariff_path)
 
-    old_stdout = sys.stdout
-    sys.stdout = captured = io.StringIO()
-    try:
-        calc.run_calculation(usage_path, tariff_path, output_dir, register)
-    except Exception as e:
-        sys.stdout = old_stdout
-        return jsonify({"error": str(e), "output": captured.getvalue()}), 500
-    finally:
-        sys.stdout = old_stdout
+    configs = [(tariff_path, "config1")]
+    if tariff_2_file:
+        tariff_2_path = os.path.join(job_dir, "tariff2.yaml")
+        tariff_2_file.save(tariff_2_path)
+        configs.append((tariff_2_path, "config2"))
 
-    result_files = sorted(glob.glob(os.path.join(output_dir, "*.csv")))
-    filenames = [os.path.basename(f) for f in result_files]
+    # Read plan names for each config
+    configs_named = []
+    for path, label in configs:
+        with open(path, encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
+        plan_name = data.get("plan_name", "(unnamed plan)")
+        configs_named.append((path, label, plan_name))
 
-    return jsonify({
-        "job_id": job_id,
-        "output": captured.getvalue(),
-        "files": filenames,
-    })
+    results = []
+    for path, label, plan_name in configs_named:
+        output_dir = os.path.join(job_dir, label, "output")
+        os.makedirs(output_dir, exist_ok=True)
+
+        old_stdout = sys.stdout
+        sys.stdout = captured = io.StringIO()
+        try:
+            calc.run_calculation(usage_path, path, output_dir, register)
+        except Exception as e:
+            sys.stdout = old_stdout
+            return jsonify(
+                {
+                    "error": f"{label} ({plan_name}): {str(e)}",
+                    "output": captured.getvalue(),
+                }
+            ), 500
+        finally:
+            sys.stdout = old_stdout
+
+        result_files = sorted(glob.glob(os.path.join(output_dir, "*.csv")))
+        file_entries = []
+        summary_totals = []
+        for fpath in result_files:
+            fname = os.path.basename(fpath)
+            file_entries.append(
+                {
+                    "filename": fname,
+                    "display_name": f"{label}_{fname}",
+                    "download_url": f"/download/{job_id}/{label}/{fname}",
+                }
+            )
+            if fname.startswith("summary"):
+                totals = parse_summary_totals(fpath)
+                if totals:
+                    summary_totals.append({**totals, "summary_file": fname})
+
+        results.append(
+            {
+                "label": label,
+                "plan_name": plan_name,
+                "output": captured.getvalue(),
+                "files": file_entries,
+                "summary_totals": summary_totals,
+            }
+        )
+
+    comparison = []
+    if len(results) == 2:
+        comparison = build_comparison(results[0], results[1])
+
+    return jsonify(
+        {
+            "job_id": job_id,
+            "configs": results,
+            "comparison": comparison,
+        }
+    )
 
 
-@app.route("/download/<job_id>/<filename>")
-def download(job_id, filename):
-    file_path = os.path.join(JOBS_DIR, job_id, "output", filename)
+@app.route("/download/<job_id>/<config_label>/<filename>")
+def download(job_id, config_label, filename):
+    filename = os.path.basename(filename)
+    file_path = os.path.join(JOBS_DIR, job_id, config_label, "output", filename)
     if not os.path.exists(file_path):
         return "File not found", 404
-    return send_file(file_path, as_attachment=True)
+    return send_file(file_path, as_attachment=True, download_name=filename)
 
 
 if __name__ == "__main__":
