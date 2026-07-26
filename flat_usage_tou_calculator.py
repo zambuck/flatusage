@@ -326,6 +326,8 @@ def parse_flat_csv(path):
         for row in reader:
             raw_register = row["RegisterCode"].strip()
             register = raw_register.split("#")[-1] if "#" in raw_register else raw_register
+            # Normalise register codes to uppercase.
+            register = register.upper()
 
             start = _parse_timestamp(row["StartDate"])
 
@@ -496,6 +498,10 @@ def main():
     ap.add_argument("--out-detail", default=None, help="Write per-interval detail to this CSV path")
     ap.add_argument("--out-summary", default=None, help="Write period/monthly summary to this CSV path")
     args = ap.parse_args()
+
+    # Force the CLI register argument to uppercase.
+    if args.register:
+        args.register = args.register.upper()
 
     try:
         records = parse_flat_csv(args.usage_csv)
