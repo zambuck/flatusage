@@ -13,7 +13,8 @@ import subprocess
 import sys
 import uuid
 import zipfile
-from datetime import datetime
+from collections import defaultdict
+from datetime import datetime, date, timedelta
 from functools import wraps
 
 import yaml
@@ -407,7 +408,6 @@ def parse_detail_load_profile(path):
             n = counts[weekday][hour]
             if n:
                 has_data = True
-                # Readings are per 30-min interval; x2 to express as an hourly kWh rate.
                 row_out.append(round(sums[weekday][hour] / n * 2, 4))
             else:
                 row_out.append(0.0)
@@ -438,6 +438,135 @@ def build_load_profiles(result_files):
         if profile:
             profiles[register] = profile
     return profiles
+
+
+# ---------------------------------------------------------------------------
+# WEEKLY CHART HELPERS
+# ---------------------------------------------------------------------------
+
+
+def register_tariff_for(tariff, register):
+    """Return the tariff that applies to a given register."""
+    if register and isinstance(tariff.get("registers"), dict) and register in tariff["registers"]:
+        t = dict(tariff["registers"][register])
+        t.setdefault("periods", [])
+        return t
+    return tariff
+
+
+def parse_detail_weekly(path, tariff):
+    """
+    Aggregate a detail CSV into ISO-calendar weeks.
+    Returns (weeks_dict, last_date) or (None, None) on failure.
+    """
+    weekly = defaultdict(lambda: {"kwh": 0.0, "cost_by_period": defaultdict(float), "dates": set()})
+    last_date = None
+    try:
+        with open(path, newline="", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                try:
+                    d = datetime.strptime(row["date"], "%Y-%m-%d").date()
+                    kwh = float(row["kwh"])
+                    cost = float(row["cost"])
+                    period = row.get("period") or "unknown"
+                except (KeyError, ValueError):
+                    continue
+                iso = d.isocalendar()
+                week_key = (iso.year, iso.week)
+                weekly[week_key]["kwh"] += kwh
+                weekly[week_key]["cost_by_period"][period] += cost
+                weekly[week_key]["dates"].add(d)
+                if last_date is None or d > last_date:
+                    last_date = d
+    except (OSError, csv.Error):
+        return None, None
+
+    if not weekly or last_date is None:
+        return None, None
+
+    supply_per_day = tariff.get("daily_supply_charge_dollars", 0.0) or 0.0
+    weeks = {}
+    for (year, week), vals in sorted(weekly.items()):
+        monday = date.fromisocalendar(year, week, 1)
+        weeks[monday.isoformat()] = {
+            "kwh": round(vals["kwh"], 3),
+            "cost_by_period": {p: round(c, 2) for p, c in vals["cost_by_period"].items()},
+            "supply_charge": round(supply_per_day * len(vals["dates"]), 2),
+        }
+    return weeks, last_date
+
+
+def build_weekly_chart(result_files, tariff):
+    """
+    Build the data structure for the last-12-months weekly diverging bar chart.
+    Returns None if no detail data is available.
+    """
+    aggregate = defaultdict(lambda: {"kwh": 0.0, "period_costs": defaultdict(float), "supply": 0.0})
+    global_last = None
+
+    for fpath in result_files:
+        fname = os.path.basename(fpath)
+        stem, _ = os.path.splitext(fname)
+        if stem != "detail" and not stem.startswith("detail_"):
+            continue
+        register = stem[len("detail"):].lstrip("_") or None
+        reg_tariff = register_tariff_for(tariff, register)
+        weeks, last_date = parse_detail_weekly(fpath, reg_tariff)
+        if not weeks:
+            continue
+        if last_date and (global_last is None or last_date > global_last):
+            global_last = last_date
+        for week_start, vals in weeks.items():
+            aggregate[week_start]["kwh"] += vals["kwh"]
+            for p, c in vals["cost_by_period"].items():
+                aggregate[week_start]["period_costs"][p] += c
+            aggregate[week_start]["supply"] += vals["supply_charge"]
+
+    if not aggregate or global_last is None:
+        return None
+
+    cutoff = global_last - timedelta(days=365)
+    labels = sorted(
+        w for w in aggregate
+        if date.fromisoformat(w) >= cutoff - timedelta(days=6)
+    )
+    if not labels:
+        return None
+
+    kwh = [round(aggregate[l]["kwh"], 2) for l in labels]
+
+    period_totals = defaultdict(float)
+    for l in labels:
+        for p, c in aggregate[l]["period_costs"].items():
+            period_totals[p] += c
+
+    categories = sorted(period_totals.keys(), key=lambda p: -period_totals[p])
+    has_supply = any(aggregate[l]["supply"] > 0 for l in labels)
+    if has_supply:
+        categories.append("Supply charge")
+
+    cost_series = {}
+    for cat in categories:
+        cost_series[cat] = [
+            round(
+                aggregate[l]["period_costs"].get(cat, 0.0)
+                + (aggregate[l]["supply"] if cat == "Supply charge" else 0.0),
+                2,
+            )
+            for l in labels
+        ]
+
+    max_cost = max(sum(cost_series[cat][i] for cat in categories) for i in range(len(labels)))
+
+    return {
+        "labels": labels,
+        "kwh": kwh,
+        "cost_series": cost_series,
+        "categories": categories,
+        "max_kwh": max(kwh) if kwh else 0,
+        "max_cost": round(max_cost, 2),
+    }
 
 
 def clean_zip_name(filename):
@@ -639,10 +768,10 @@ def calculate():
         with open(path, "w", encoding="utf-8") as f:
             yaml.safe_dump(data, f)
         plan_name = data.get("plan_name", "(unnamed plan)")
-        configs_named.append((path, label, original_name, plan_name))
+        configs_named.append((path, label, original_name, plan_name, data))
 
     results = []
-    for path, label, original_name, plan_name in configs_named:
+    for path, label, original_name, plan_name, data in configs_named:
         output_dir = os.path.join(job_dir, label, "output")
         os.makedirs(output_dir, mode=0o700, exist_ok=True)
 
@@ -681,6 +810,7 @@ def calculate():
 
         zip_name = clean_zip_name(original_name)
         load_profiles = build_load_profiles(result_files)
+        weekly_chart = build_weekly_chart(result_files, data)
         results.append(
             {
                 "label": label,
@@ -692,6 +822,7 @@ def calculate():
                 "files": file_entries,
                 "summary_totals": summary_totals,
                 "load_profiles": load_profiles,
+                "weekly_chart": weekly_chart,
             }
         )
 
