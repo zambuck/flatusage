@@ -250,6 +250,18 @@ function renderLoadProfile(register, profile) {
 
 /* ----------------- new weekly chart renderer ----------------- */
 
+const REGISTER_PALETTE = ["#fd7e14", "#20c997", "#6f42c1", "#d63384", "#0dcaf0", "#adb5bd", "#ffc107"];
+const registerColorCache = {};
+
+function colorForRegister(register) {
+  if (!register) return "#6c757d";
+  if (!registerColorCache[register]) {
+    const idx = Object.keys(registerColorCache).length % REGISTER_PALETTE.length;
+    registerColorCache[register] = REGISTER_PALETTE[idx];
+  }
+  return registerColorCache[register];
+}
+
 function renderWeeklyChart(data, title) {
   const wrap = document.createElement("div");
   wrap.className = "weekly-chart";
@@ -263,14 +275,16 @@ function renderWeeklyChart(data, title) {
     return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
   });
 
-  const kwh = data.kwh;
-  const categories = data.categories || Object.keys(data.cost_series);
+  const costCategories = data.categories || Object.keys(data.cost_series);
   const costSeries = data.cost_series;
+
+  const kwhCategories = data.kwh_categories || Object.keys(data.kwh_series);
+  const kwhSeries = data.kwh_series;
 
   const margin = { top: 30, right: 70, bottom: 90, left: 70 };
   const slot = 28;
-  const chartHeight = 260;       // total vertical span
-  const half = chartHeight / 2;  // distance from axis to top/bottom edges
+  const chartHeight = 260;
+  const half = chartHeight / 2;
   const width = Math.max(720, margin.left + labels.length * slot + margin.right);
   const height = chartHeight + margin.top + margin.bottom;
   const baseline = margin.top + half;
@@ -282,11 +296,15 @@ function renderWeeklyChart(data, title) {
     return "$" + n.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
   }
 
+  const allKwh = Object.values(kwhSeries).flat();
+  const maxKwh = Math.max(...(allKwh.length ? allKwh : [0]), 0.1);
+  const maxCost = Math.max(data.max_cost || 0, 0.1);
+
   function kwhY(v) {
-    return half * (v / Math.max(maxKwh, 0.1));
+    return half * (v / maxKwh);
   }
   function costY(v) {
-    return half * (v / Math.max(maxCost, 0.1));
+    return half * (v / maxCost);
   }
 
   function ticks(max) {
@@ -306,8 +324,6 @@ function renderWeeklyChart(data, title) {
     return out;
   }
 
-  const maxKwh = Math.max(...(kwh.length ? kwh : [0]), 0.1);
-  const maxCost = Math.max(data.max_cost || 0, 0.1);
   const kwhTicks = ticks(maxKwh);
   const costTicks = ticks(maxCost);
 
@@ -321,7 +337,7 @@ function renderWeeklyChart(data, title) {
   // central horizontal axis
   svg += `<line class="weekly-axis" x1="${margin.left}" y1="${baseline}" x2="${width - margin.right}" y2="${baseline}" />`;
 
-  // grid lines: cost ticks above, kWh ticks below
+  // grid lines
   kwhTicks.forEach((t) => {
     if (t === 0) return;
     const y = baseline + kwhY(t);
@@ -349,20 +365,27 @@ function renderWeeklyChart(data, title) {
 
   const barW = Math.max(6, slot - 8);
 
-  // bars
+  // bars per week
   labels.forEach((label, i) => {
     const cx = margin.left + i * slot + slot / 2;
     const x = cx - barW / 2;
 
-    // kWh bar: downward from axis
-    const kh = kwhY(kwh[i]);
-    svg += `<rect x="${x}" y="${baseline}" width="${barW}" height="${kh}" fill="#6c757d" opacity="0.9" rx="2">
-      <title>Week starting ${label}\nUsage: ${fmt(kwh[i])} kWh</title>
-    </rect>`;
+    // kWh bars: stacked downward from axis, one per register
+    let kwhCum = 0;
+    kwhCategories.forEach((reg) => {
+      const val = kwhSeries[reg][i];
+      if (!val) return;
+      const h = kwhY(val);
+      const y = baseline + kwhCum;
+      kwhCum += h;
+      svg += `<rect x="${x}" y="${y}" width="${barW}" height="${h}" fill="${colorForRegister(reg)}" opacity="0.9" rx="2">
+        <title>Week starting ${label}\n${reg} usage: ${fmt(val)} kWh</title>
+      </rect>`;
+    });
 
     // cost bars: stacked upward from axis
     let cum = 0;
-    categories.forEach((cat) => {
+    costCategories.forEach((cat) => {
       const val = costSeries[cat][i];
       if (!val) return;
       const h = costY(val);
@@ -374,7 +397,7 @@ function renderWeeklyChart(data, title) {
     });
   });
 
-  // x-axis week labels below the kWh bars
+  // x-axis week labels
   const labelY = baseline + half + 16;
   labels.forEach((label, i) => {
     const cx = margin.left + i * slot + slot / 2;
@@ -391,8 +414,8 @@ function renderWeeklyChart(data, title) {
   const legend = document.createElement("div");
   legend.className = "weekly-legend";
   legend.innerHTML = `
-    <span><span class="legend-swatch" style="background:#6c757d"></span>kWh usage</span>
-    ${categories.map((cat) => `<span><span class="legend-swatch" style="background:${costColor(cat)}"></span>${cat}</span>`).join("")}
+    ${kwhCategories.map((reg) => `<span><span class="legend-swatch" style="background:${colorForRegister(reg)}"></span>${reg} kWh</span>`).join("")}
+    ${costCategories.map((cat) => `<span><span class="legend-swatch" style="background:${costColor(cat)}"></span>${cat}</span>`).join("")}
   `;
   wrap.appendChild(legend);
 
