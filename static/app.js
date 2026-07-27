@@ -356,7 +356,8 @@ function renderWeeklyChart(data, title) {
     if (cat.toLowerCase().endsWith(" supply")) return "#444c56";
     for (const reg of exportRegisters) {
       if (cat.startsWith(reg + " ")) {
-        return colorForRegister(reg);
+        // Export feed-in credits: distinct from the kWh export colour.
+        return "#2ea44f";
       }
     }
     let base = cat;
