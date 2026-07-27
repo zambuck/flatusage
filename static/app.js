@@ -353,7 +353,14 @@ function renderWeeklyChart(data, title) {
 
   function costColor(cat) {
     if (cat.toLowerCase().endsWith(" supply")) return "#444c56";
-    return colorForPeriod(cat);
+    let base = cat;
+    for (const reg of kwhCategories) {
+      if (base.startsWith(reg + " ")) {
+        base = base.slice(reg.length + 1);
+        break;
+      }
+    }
+    return colorForPeriod(base);
   }
 
   let svg = `<svg viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg">`;
