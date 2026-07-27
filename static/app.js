@@ -255,6 +255,7 @@ const registerColorCache = {};
 
 function colorForRegister(register) {
   if (!register) return "#6c757d";
+  if (register === "B1") return "#f59f00"; // solar yellow
   if (!registerColorCache[register]) {
     const idx = Object.keys(registerColorCache).length % REGISTER_PALETTE.length;
     registerColorCache[register] = REGISTER_PALETTE[idx];
@@ -277,9 +278,10 @@ function renderWeeklyChart(data, title) {
 
   const costCategories = data.categories || Object.keys(data.cost_series);
   const costSeries = data.cost_series;
-
   const kwhCategories = data.kwh_categories || Object.keys(data.kwh_series);
   const kwhSeries = data.kwh_series;
+  const exportRegisters = new Set(data.export_registers || []);
+  const exportCostCats = new Set(data.export_cost_categories || []);
 
   const margin = { top: 30, right: 70, bottom: 90, left: 70 };
   const slot = 28;
@@ -307,7 +309,6 @@ function renderWeeklyChart(data, title) {
     return half * (v / maxCost);
   }
 
-  // Nice tick-step generator that guarantees at least targetCount+1 labels.
   function niceTicks(max, targetCount) {
     if (max <= 0) return [0];
     const raw = max / targetCount;
@@ -353,6 +354,11 @@ function renderWeeklyChart(data, title) {
 
   function costColor(cat) {
     if (cat.toLowerCase().endsWith(" supply")) return "#444c56";
+    for (const reg of exportRegisters) {
+      if (cat.startsWith(reg + " ")) {
+        return colorForRegister(reg);
+      }
+    }
     let base = cat;
     for (const reg of kwhCategories) {
       if (base.startsWith(reg + " ")) {
@@ -368,7 +374,7 @@ function renderWeeklyChart(data, title) {
   // central horizontal axis
   svg += `<line class="weekly-axis" x1="${margin.left}" y1="${baseline}" x2="${width - margin.right}" y2="${baseline}" />`;
 
-  // vertical dotted guides at each week (behind the bars)
+  // vertical dotted guides at each week
   labels.forEach((_, i) => {
     const x = margin.left + i * slot + slot / 2;
     svg += `<line class="weekly-grid" x1="${x}" y1="${margin.top}" x2="${x}" y2="${margin.top + chartHeight}" />`;
@@ -386,51 +392,78 @@ function renderWeeklyChart(data, title) {
     svg += `<line class="weekly-grid" x1="${margin.left}" y1="${y}" x2="${width - margin.right}" y2="${y}" />`;
   });
 
-  // left axis labels: kWh usage (below axis)
+  // left axis labels: kWh
   kwhTicks.forEach((t) => {
-    const y = baseline + kwhY(t);
-    svg += `<text class="weekly-axis-label" x="${margin.left - 6}" y="${y + 3}" text-anchor="end">${fmt(t)}</text>`;
+    const yDown = baseline + kwhY(t);
+    svg += `<text class="weekly-axis-label" x="${margin.left - 6}" y="${yDown + 3}" text-anchor="end">${fmt(t)}</text>`;
+    const yUp = baseline - kwhY(t);
+    svg += `<text class="weekly-axis-label" x="${margin.left - 6}" y="${yUp + 3}" text-anchor="end">${fmt(t)}</text>`;
   });
-  svg += `<text class="weekly-axis-label" transform="rotate(-90, ${margin.left - 45}, ${baseline + half / 2})" x="${margin.left - 45}" y="${baseline + half / 2}" text-anchor="middle">kWh usage per week</text>`;
+  // left axis titles
+  svg += `<text class="weekly-axis-label" transform="rotate(-90, ${margin.left - 45}, ${baseline + half / 2})" x="${margin.left - 45}" y="${baseline + half / 2}" text-anchor="middle">kWh used</text>`;
+  svg += `<text class="weekly-axis-label" transform="rotate(90, ${margin.left - 45}, ${baseline - half / 2})" x="${margin.left - 45}" y="${baseline - half / 2}" text-anchor="middle">kWh exported</text>`;
 
-  // right axis labels: cost (above axis)
+  // right axis labels: dollars
   costTicks.forEach((t) => {
-    const y = baseline - costY(t);
-    svg += `<text class="weekly-axis-label" x="${width - margin.right + 6}" y="${y + 3}" text-anchor="start">${fmtMoney(t)}</text>`;
+    const yUp = baseline - costY(t);
+    svg += `<text class="weekly-axis-label" x="${width - margin.right + 6}" y="${yUp + 3}" text-anchor="start">${fmtMoney(t)}</text>`;
+    const yDown = baseline + costY(t);
+    svg += `<text class="weekly-axis-label" x="${width - margin.right + 6}" y="${yDown + 3}" text-anchor="start">${fmtMoney(t)}</text>`;
   });
-  svg += `<text class="weekly-axis-label" transform="rotate(90, ${width - margin.right + 45}, ${baseline - half / 2})" x="${width - margin.right + 45}" y="${baseline - half / 2}" text-anchor="middle">Cost per week ($)</text>`;
+  // right axis titles
+  svg += `<text class="weekly-axis-label" transform="rotate(90, ${width - margin.right + 45}, ${baseline - half / 2})" x="${width - margin.right + 45}" y="${baseline - half / 2}" text-anchor="middle">Cost ($)</text>`;
+  svg += `<text class="weekly-axis-label" transform="rotate(-90, ${width - margin.right + 45}, ${baseline + half / 2})" x="${width - margin.right + 45}" y="${baseline + half / 2}" text-anchor="middle">Credits ($)</text>`;
 
   const barW = Math.max(6, slot - 8);
 
-  // bars per week
   labels.forEach((label, i) => {
     const cx = margin.left + i * slot + slot / 2;
     const x = cx - barW / 2;
 
-    // kWh bars: stacked downward from axis, one per register
-    let kwhCum = 0;
+    // kWh bars
+    //   consumption downward, export upward
+    let kwhDownCum = 0;
+    let kwhUpCum = 0;
     kwhCategories.forEach((reg) => {
       const val = kwhSeries[reg][i];
       if (!val) return;
       const h = kwhY(val);
-      const y = baseline + kwhCum;
-      kwhCum += h;
-      svg += `<rect x="${x}" y="${y}" width="${barW}" height="${h}" fill="${colorForRegister(reg)}" opacity="0.9" rx="2">
-        <title>Week starting ${label}\n${reg} usage: ${fmt(val)} kWh</title>
-      </rect>`;
+      if (exportRegisters.has(reg)) {
+        const y = baseline - kwhUpCum - h;
+        kwhUpCum += h;
+        svg += `<rect x="${x}" y="${y}" width="${barW}" height="${h}" fill="${colorForRegister(reg)}" opacity="0.9" rx="2">
+          <title>Week starting ${label}\n${reg} exported: ${fmt(val)} kWh</title>
+        </rect>`;
+      } else {
+        const y = baseline + kwhDownCum;
+        kwhDownCum += h;
+        svg += `<rect x="${x}" y="${y}" width="${barW}" height="${h}" fill="${colorForRegister(reg)}" opacity="0.9" rx="2">
+          <title>Week starting ${label}\n${reg} usage: ${fmt(val)} kWh</title>
+        </rect>`;
+      }
     });
 
-    // cost bars: stacked upward from axis
-    let cum = 0;
+    // cost bars
+    //   consumption costs upward, export credits downward
+    let costUpCum = 0;
+    let costDownCum = 0;
     costCategories.forEach((cat) => {
       const val = costSeries[cat][i];
       if (!val) return;
       const h = costY(val);
-      const y = baseline - cum - h;
-      cum += h;
-      svg += `<rect x="${x}" y="${y}" width="${barW}" height="${h}" fill="${costColor(cat)}" opacity="0.9" rx="2">
-        <title>Week starting ${label}\n${cat}: ${fmtMoney(val)}</title>
-      </rect>`;
+      if (exportCostCats.has(cat)) {
+        const y = baseline + costDownCum;
+        costDownCum += h;
+        svg += `<rect x="${x}" y="${y}" width="${barW}" height="${h}" fill="${costColor(cat)}" opacity="0.9" rx="2">
+          <title>Week starting ${label}\n${cat} credit: ${fmtMoney(val)}</title>
+        </rect>`;
+      } else {
+        const y = baseline - costUpCum - h;
+        costUpCum += h;
+        svg += `<rect x="${x}" y="${y}" width="${barW}" height="${h}" fill="${costColor(cat)}" opacity="0.9" rx="2">
+          <title>Week starting ${label}\n${cat}: ${fmtMoney(val)}</title>
+        </rect>`;
+      }
     });
   });
 
