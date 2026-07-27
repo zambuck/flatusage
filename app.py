@@ -70,10 +70,13 @@ ALLOWED_TOP_KEYS = {
     "periods",
     "registers",
     "default_rate",
+    "blocks",
 }
+
 ALLOWED_PERIOD_KEYS = {"name", "months", "days", "windows", "rate"}
 ALLOWED_WINDOW_KEYS = {"start", "end"}
 ALLOWED_REGISTER_KEYS = {"label", "daily_supply_charge_dollars", "periods", "default_rate"}
+ALLOWED_BLOCK_KEYS = {"limit_kwh", "rate", "period"}
 
 CSV_INJECTION_CHARS = ("=", "+", "-", "@", "\t", "\r")
 
@@ -222,6 +225,23 @@ def validate_tariff(data):
             for key in window:
                 if key not in ALLOWED_WINDOW_KEYS:
                     raise ValueError(f"Unexpected window key: {key}")
+    blocks = data.get("blocks")
+    if blocks is not None:
+        if not isinstance(blocks, list):
+            raise ValueError("'blocks' must be a list")
+        for block in blocks:
+            if not isinstance(block, dict):
+                raise ValueError("Each block must be a mapping")
+            for key in block:
+                if key not in ALLOWED_BLOCK_KEYS:
+                    raise ValueError(f"Unexpected block key: {key}")
+            period = block.get("period", "daily")
+            if period not in ("daily", "monthly"):
+                raise ValueError(f"Block period must be 'daily' or 'monthly', got {period!r}")
+            if "limit_kwh" not in block or not isinstance(block["limit_kwh"], (int, float)):
+                raise ValueError("Each block must specify a numeric 'limit_kwh'")
+            if "rate" not in block or not isinstance(block["rate"], (int, float)):
+                raise ValueError("Each block must specify a numeric 'rate'")
 
     registers = data.get("registers")
     if registers is not None:
@@ -419,7 +439,13 @@ def parse_detail_load_profile(path):
     period_by_hour = []
     for hour in range(24):
         hour_counts = period_hour_counts[hour]
-        period_by_hour.append(max(hour_counts, key=hour_counts.get) if hour_counts else None)
+        non_block = {p: c for p, c in hour_counts.items() if p != "block"}
+        if non_block:
+            period_by_hour.append(max(non_block, key=non_block.get))
+        elif hour_counts:
+            period_by_hour.append(max(hour_counts, key=hour_counts.get))
+        else:
+            period_by_hour.append(None)
 
     return {"grid": grid, "period_by_hour": period_by_hour}
 
