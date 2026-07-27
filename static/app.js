@@ -152,12 +152,22 @@ const periodColorCache = {};
 function colorForPeriod(period) {
   if (!period) return "#d0d7de";
   const lower = period.toLowerCase();
-  if (lower.includes("peak") && !lower.includes("off-peak")) {
-    if (!periodColorCache[period]) {
-      periodColorCache[period] = "#dc2626";
-    }
+
+  if (lower === "default") {
+    if (!periodColorCache[period]) periodColorCache[period] = "#64748b"; // blue-grey
     return periodColorCache[period];
   }
+
+  if (lower === "solar_soak") {
+    if (!periodColorCache[period]) periodColorCache[period] = "#eab308"; // medium-yellow
+    return periodColorCache[period];
+  }
+
+  if (lower.includes("peak") && !lower.includes("off-peak")) {
+    if (!periodColorCache[period]) periodColorCache[period] = "#dc2626"; // red
+    return periodColorCache[period];
+  }
+
   if (!periodColorCache[period]) {
     const idx = Object.keys(periodColorCache).length % PERIOD_PALETTE.length;
     periodColorCache[period] = PERIOD_PALETTE[idx];
