@@ -305,9 +305,13 @@ def _parse_timestamp(s):
     s = s.strip()
     formats = [
         "%d/%m/%Y %I:%M:%S %p",
+        "%d/%m/%Y %I:%M %p",
         "%d/%m/%Y %H:%M:%S",
+        "%d/%m/%Y %H:%M",
         "%Y-%m-%d %H:%M:%S",
         "%Y-%m-%dT%H:%M:%S",
+        "%Y-%m-%d %H:%M",
+        "%Y-%m-%dT%H:%M",
     ]
     for fmt in formats:
         try:
@@ -315,6 +319,7 @@ def _parse_timestamp(s):
         except ValueError:
             continue
     raise ValueError(f"Could not parse timestamp: {s!r}")
+
 
 
 def parse_flat_csv(path):
