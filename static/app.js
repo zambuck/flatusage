@@ -145,6 +145,113 @@ function renderComparison(comparison, note) {
   return div;
 }
 
+const DAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+const PERIOD_PALETTE = ["#0969da", "#bf3989", "#9a6700", "#1a7f37", "#8250df", "#cf222e", "#0a7ea4"];
+const periodColorCache = {};
+
+function colorForPeriod(period) {
+  if (!period) return "#d0d7de";
+  if (!periodColorCache[period]) {
+    const idx = Object.keys(periodColorCache).length % PERIOD_PALETTE.length;
+    periodColorCache[period] = PERIOD_PALETTE[idx];
+  }
+  return periodColorCache[period];
+}
+
+function heatColor(value, min, max) {
+  const stops = [
+    [230, 241, 251], [181, 212, 244], [133, 183, 235],
+    [55, 138, 221], [24, 95, 165], [12, 68, 124], [4, 44, 83],
+  ];
+  const t = max > min ? (value - min) / (max - min) : 0;
+  const idx = t * (stops.length - 1);
+  const i0 = Math.floor(idx);
+  const i1 = Math.min(i0 + 1, stops.length - 1);
+  const f = idx - i0;
+  const c = stops[i0].map((s, k) => Math.round(s + (stops[i1][k] - s) * f));
+  return `rgb(${c[0]}, ${c[1]}, ${c[2]})`;
+}
+
+function renderLoadProfile(register, profile) {
+  const wrap = document.createElement("div");
+  wrap.className = "load-profile";
+
+  const heading = document.createElement("h4");
+  heading.textContent = `Load profile — ${register}`;
+  wrap.appendChild(heading);
+
+  const flat = profile.grid.flat();
+  const min = Math.min(...flat);
+  const max = Math.max(...flat);
+
+  // Tariff-period strip across the top, one swatch per hour.
+  const stripRow = document.createElement("div");
+  stripRow.className = "heatmap-row";
+  const stripLabel = document.createElement("div");
+  stripLabel.className = "heatmap-row-label";
+  stripLabel.textContent = "Tariff";
+  stripRow.appendChild(stripLabel);
+  for (let h = 0; h < 24; h++) {
+    const cell = document.createElement("div");
+    cell.className = "heatmap-cell period-cell";
+    const period = profile.period_by_hour[h];
+    cell.style.background = colorForPeriod(period);
+    cell.title = `${h}:00 — ${period || "unknown"}`;
+    stripRow.appendChild(cell);
+  }
+  wrap.appendChild(stripRow);
+
+  // Hour labels.
+  const hourRow = document.createElement("div");
+  hourRow.className = "heatmap-row";
+  const hourSpacer = document.createElement("div");
+  hourSpacer.className = "heatmap-row-label";
+  hourRow.appendChild(hourSpacer);
+  for (let h = 0; h < 24; h++) {
+    const cell = document.createElement("div");
+    cell.className = "heatmap-hour-label";
+    cell.textContent = h % 3 === 0 ? h : "";
+    hourRow.appendChild(cell);
+  }
+  wrap.appendChild(hourRow);
+
+  // Usage heatmap grid, one row per weekday.
+  DAY_LABELS.forEach((day, r) => {
+    const row = document.createElement("div");
+    row.className = "heatmap-row";
+    const label = document.createElement("div");
+    label.className = "heatmap-row-label";
+    label.textContent = day;
+    row.appendChild(label);
+    for (let h = 0; h < 24; h++) {
+      const value = profile.grid[r][h];
+      const cell = document.createElement("div");
+      cell.className = "heatmap-cell";
+      cell.style.background = heatColor(value, min, max);
+      cell.title = `${day} ${h}:00 — avg ${value.toFixed(2)} kWh`;
+      row.appendChild(cell);
+    }
+    wrap.appendChild(row);
+  });
+
+  // Legend: usage scale + tariff-period colors.
+  const legend = document.createElement("div");
+  legend.className = "heatmap-legend";
+  legend.innerHTML = `
+    <span class="legend-scale">
+      Low <span class="scale-bar"></span> High
+    </span>
+    <span class="legend-periods">
+      ${Object.keys(periodColorCache)
+        .map((p) => `<span class="legend-swatch" style="background:${periodColorCache[p]}"></span>${p}`)
+        .join(" ")}
+    </span>
+  `;
+  wrap.appendChild(legend);
+
+  return wrap;
+}
+
 form.addEventListener("submit", async (e) => {
   e.preventDefault();
   errorDiv.innerHTML = "";
@@ -189,6 +296,13 @@ form.addEventListener("submit", async (e) => {
 
       html += `<div class="console-output">${cfg.output}</div>`;
       block.innerHTML = html;
+
+      if (cfg.load_profiles) {
+        for (const [register, profile] of Object.entries(cfg.load_profiles)) {
+          block.appendChild(renderLoadProfile(register, profile));
+        }
+      }
+
       resultsDiv.appendChild(block);
     }
   } catch (err) {
