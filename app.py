@@ -519,7 +519,8 @@ def parse_detail_weekly(path, tariff, register=None):
 def build_weekly_chart(result_files, tariff):
     """
     Build the data structure for the last-12-months weekly diverging bar chart.
-    kWh is split by register and cost categories are kept separate per register.
+    kWh and cost are split by register. Solar/export registers (B1 or negative
+    total kWh) are rendered upward/downward as positive magnitudes.
     Returns None if no detail data is available.
     """
     aggregate = defaultdict(
@@ -563,43 +564,83 @@ def build_weekly_chart(result_files, tariff):
     if not labels:
         return None
 
-    # Order kWh registers by total usage (largest first).
+    # Determine export registers by negative total kWh or B1 code.
     kwh_totals = defaultdict(float)
     for l in labels:
         for r, k in aggregate[l]["kwh_by_register"].items():
             kwh_totals[r] += k
-    kwh_categories = sorted(kwh_totals.keys(), key=lambda r: -kwh_totals[r])
-
-    kwh_series = {
-        r: [round(aggregate[l]["kwh_by_register"].get(r, 0.0), 2) for l in labels]
-        for r in kwh_categories
+    export_registers = {
+        r for r, total in kwh_totals.items()
+        if total < 0 or r.startswith("B1")
     }
-    max_kwh = max((max(v) for v in kwh_series.values()), default=0.0)
 
-    # Order cost categories by total spend (largest first).
+    # Build kWh series: consumption downward, export upward (positive magnitude).
+    consumption_registers = sorted(
+        (r for r in kwh_totals if r not in export_registers),
+        key=lambda r: -kwh_totals[r],
+    )
+    export_registers_sorted = sorted(
+        export_registers,
+        key=lambda r: -abs(kwh_totals[r]),
+    )
+    kwh_categories = consumption_registers + export_registers_sorted
+
+    kwh_series = {}
+    max_kwh = 0.0
+    for r in kwh_categories:
+        series = []
+        for l in labels:
+            v = abs(aggregate[l]["kwh_by_register"].get(r, 0.0))
+            series.append(round(v, 2))
+            max_kwh = max(max_kwh, v)
+        kwh_series[r] = series
+
+    # Identify export cost categories and flip credits to positive magnitudes.
     period_totals = defaultdict(float)
     for l in labels:
         for p, c in aggregate[l]["period_costs"].items():
             period_totals[p] += c
-    categories = sorted(period_totals.keys(), key=lambda p: -period_totals[p])
 
-    # Supply-charge categories (one per register if multiple).
+    export_cost_categories = set()
+    for cat in list(period_totals.keys()):
+        if any(cat.startswith(reg + " ") or cat == reg + " supply" for reg in export_registers):
+            export_cost_categories.add(cat)
+
     supply_keys = sorted({k for l in labels for k in aggregate[l]["supply"].keys()})
-    categories.extend(supply_keys)
+    for cat in supply_keys:
+        if any(cat.startswith(reg + " ") or cat == reg + " supply" for reg in export_registers):
+            export_cost_categories.add(cat)
+
+    # Order consumption cost categories by total spend, then export credits.
+    consumption_cats = sorted(
+        (c for c in period_totals if c not in export_cost_categories),
+        key=lambda c: -period_totals[c],
+    )
+    export_cats = sorted(
+        (c for c in export_cost_categories if c in period_totals),
+        key=lambda c: -abs(period_totals[c]),
+    )
+    export_supply_cats = sorted(c for c in export_cost_categories if c in supply_keys)
+    categories = consumption_cats + export_cats + export_supply_cats
 
     cost_series = {}
+    max_cost = 0.0
     for cat in categories:
-        cost_series[cat] = [
-            round(
-                aggregate[l]["period_costs"].get(cat, 0.0)
-                + aggregate[l]["supply"].get(cat, 0.0),
-                2,
-            )
-            for l in labels
-        ]
+        series = []
+        for l in labels:
+            v = aggregate[l]["period_costs"].get(cat, 0.0) + aggregate[l]["supply"].get(cat, 0.0)
+            v = abs(v)
+            series.append(round(v, 2))
+            max_cost = max(max_cost, v)
+        cost_series[cat] = series
 
-    max_cost = max(
+    # Total stacked max per side also matters for axis scaling.
+    max_stacked_cost = max(
         sum(cost_series[cat][i] for cat in categories)
+        for i in range(len(labels))
+    )
+    max_stacked_kwh = max(
+        sum(kwh_series[r][i] for r in kwh_categories)
         for i in range(len(labels))
     )
 
@@ -607,10 +648,12 @@ def build_weekly_chart(result_files, tariff):
         "labels": labels,
         "kwh_series": kwh_series,
         "kwh_categories": kwh_categories,
+        "export_registers": sorted(export_registers),
         "cost_series": cost_series,
         "categories": categories,
-        "max_kwh": round(max_kwh, 2),
-        "max_cost": round(max_cost, 2),
+        "export_cost_categories": sorted(export_cost_categories),
+        "max_kwh": round(max(max_kwh, max_stacked_kwh), 2),
+        "max_cost": round(max(max_cost, max_stacked_cost), 2),
     }
 
 def clean_zip_name(filename):
