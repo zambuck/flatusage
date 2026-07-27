@@ -312,7 +312,7 @@ function renderWeeklyChart(data, title) {
   const costTicks = ticks(maxCost);
 
   function costColor(cat) {
-    if (cat === "Supply charge") return "#444c56";
+    if (cat.toLowerCase().endsWith(" supply")) return "#444c56";
     return colorForPeriod(cat);
   }
 
