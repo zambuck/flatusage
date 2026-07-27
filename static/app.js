@@ -184,7 +184,6 @@ function renderLoadProfile(register, profile) {
   const min = Math.min(...flat);
   const max = Math.max(...flat);
 
-  // Tariff-period strip across the top, one swatch per hour.
   const stripRow = document.createElement("div");
   stripRow.className = "heatmap-row";
   const stripLabel = document.createElement("div");
@@ -201,7 +200,6 @@ function renderLoadProfile(register, profile) {
   }
   wrap.appendChild(stripRow);
 
-  // Hour labels.
   const hourRow = document.createElement("div");
   hourRow.className = "heatmap-row";
   const hourSpacer = document.createElement("div");
@@ -215,7 +213,6 @@ function renderLoadProfile(register, profile) {
   }
   wrap.appendChild(hourRow);
 
-  // Usage heatmap grid, one row per weekday.
   DAY_LABELS.forEach((day, r) => {
     const row = document.createElement("div");
     row.className = "heatmap-row";
@@ -234,7 +231,6 @@ function renderLoadProfile(register, profile) {
     wrap.appendChild(row);
   });
 
-  // Legend: usage scale + tariff-period colors.
   const legend = document.createElement("div");
   legend.className = "heatmap-legend";
   legend.innerHTML = `
@@ -251,6 +247,151 @@ function renderLoadProfile(register, profile) {
 
   return wrap;
 }
+
+/* ----------------- new weekly chart renderer ----------------- */
+
+function renderWeeklyChart(data, title) {
+  const wrap = document.createElement("div");
+  wrap.className = "weekly-chart";
+
+  const heading = document.createElement("h4");
+  heading.textContent = title || "Weekly usage & cost (last 12 months)";
+  wrap.appendChild(heading);
+
+  const labels = data.labels.map((iso) => {
+    const d = new Date(iso + "T00:00:00");
+    return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  });
+
+  const kwh = data.kwh;
+  const categories = data.categories || Object.keys(data.cost_series);
+  const costSeries = data.cost_series;
+
+  const maxKwh = Math.max(...(kwh.length ? kwh : [0]), 0.1);
+  const maxCost = Math.max(data.max_cost || 0, 0.1);
+
+  const margin = { top: 30, right: 70, bottom: 90, left: 70 };
+  const slot = 28;
+  const chartHeight = 260;
+  const width = Math.max(720, margin.left + labels.length * slot + margin.right);
+  const height = chartHeight + margin.top + margin.bottom;
+
+  function fmt(n) {
+    return n.toLocaleString(undefined, { maximumFractionDigits: 1 });
+  }
+  function fmtMoney(n) {
+    return "$" + n.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+  }
+
+  function kwhY(v) {
+    return chartHeight * (v / maxKwh);
+  }
+  function costY(v) {
+    return chartHeight * (v / maxCost);
+  }
+
+  function ticks(max) {
+    const rawStep = max / 4;
+    if (rawStep === 0) return [0];
+    const exp = Math.floor(Math.log10(rawStep));
+    const frac = rawStep / Math.pow(10, exp);
+    let niceFrac = frac <= 1 ? 1 : frac <= 2 ? 2 : frac <= 5 ? 5 : 10;
+    const step = niceFrac * Math.pow(10, exp);
+    const out = [];
+    for (let i = 0; i <= 6; i++) {
+      const v = i * step;
+      if (v > max * 1.01) break;
+      out.push(v);
+    }
+    if (out.length === 0) out.push(max);
+    return out;
+  }
+
+  const kwhTicks = ticks(maxKwh);
+  const costTicks = ticks(maxCost);
+
+  function costColor(cat) {
+    if (cat === "Supply charge") return "#444c56";
+    return colorForPeriod(cat);
+  }
+
+  const baseline = margin.top + chartHeight;
+
+  let svg = `<svg viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg">`;
+
+  svg += `<line class="weekly-axis" x1="${margin.left}" y1="${baseline}" x2="${width - margin.right}" y2="${baseline}" />`;
+
+  kwhTicks.forEach((t) => {
+    if (t === 0) return;
+    const y = baseline - kwhY(t);
+    svg += `<line class="weekly-grid" x1="${margin.left}" y1="${y}" x2="${width - margin.right}" y2="${y}" />`;
+  });
+  costTicks.forEach((t) => {
+    if (t === 0) return;
+    const y = baseline - costY(t);
+    svg += `<line class="weekly-grid" x1="${margin.left}" y1="${y}" x2="${width - margin.right}" y2="${y}" />`;
+  });
+
+  kwhTicks.forEach((t) => {
+    const y = baseline - kwhY(t);
+    svg += `<text class="weekly-axis-label" x="${margin.left - 6}" y="${y + 3}" text-anchor="end">${fmt(t)}</text>`;
+  });
+  svg += `<text class="weekly-axis-label" transform="rotate(-90, ${margin.left - 45}, ${baseline - chartHeight / 2})" x="${margin.left - 45}" y="${baseline - chartHeight / 2}" text-anchor="middle">kWh usage per week</text>`;
+
+  costTicks.forEach((t) => {
+    const y = baseline - costY(t);
+    svg += `<text class="weekly-axis-label" x="${width - margin.right + 6}" y="${y + 3}" text-anchor="start">${fmtMoney(t)}</text>`;
+  });
+  svg += `<text class="weekly-axis-label" transform="rotate(90, ${width - margin.right + 45}, ${baseline - chartHeight / 2})" x="${width - margin.right + 45}" y="${baseline - chartHeight / 2}" text-anchor="middle">Cost per week ($)</text>`;
+
+  const barW = Math.max(6, slot - 8);
+
+  labels.forEach((label, i) => {
+    const cx = margin.left + i * slot + slot / 2;
+    const x = cx - barW / 2;
+
+    const kh = kwhY(kwh[i]);
+    svg += `<rect x="${x}" y="${baseline - kh}" width="${barW}" height="${kh}" fill="#6c757d" opacity="0.9" rx="2">
+      <title>Week starting ${label}\nUsage: ${fmt(kwh[i])} kWh</title>
+    </rect>`;
+
+    let cum = 0;
+    categories.forEach((cat) => {
+      const val = costSeries[cat][i];
+      if (!val) return;
+      const h = costY(val);
+      const y = baseline - cum - h;
+      cum += h;
+      svg += `<rect x="${x}" y="${y}" width="${barW}" height="${h}" fill="${costColor(cat)}" opacity="0.9" rx="2">
+        <title>Week starting ${label}\n${cat}: ${fmtMoney(val)}</title>
+      </rect>`;
+    });
+  });
+
+  labels.forEach((label, i) => {
+    const cx = margin.left + i * slot + slot / 2;
+    if (labels.length > 30 && i % 2 !== 0) return;
+    svg += `<text class="weekly-x-label" transform="rotate(-45, ${cx}, ${baseline + 14})" x="${cx}" y="${baseline + 14}">${label}</text>`;
+  });
+
+  svg += `</svg>`;
+
+  const chartDiv = document.createElement("div");
+  chartDiv.innerHTML = svg;
+  wrap.appendChild(chartDiv);
+
+  const legend = document.createElement("div");
+  legend.className = "weekly-legend";
+  legend.innerHTML = `
+    <span><span class="legend-swatch" style="background:#6c757d"></span>kWh usage</span>
+    ${categories.map((cat) => `<span><span class="legend-swatch" style="background:${costColor(cat)}"></span>${cat}</span>`).join("")}
+  `;
+  wrap.appendChild(legend);
+
+  return wrap;
+}
+
+/* ----------------- end weekly chart renderer ----------------- */
 
 form.addEventListener("submit", async (e) => {
   e.preventDefault();
@@ -301,6 +442,12 @@ form.addEventListener("submit", async (e) => {
         for (const [register, profile] of Object.entries(cfg.load_profiles)) {
           block.appendChild(renderLoadProfile(register, profile));
         }
+      }
+
+      if (cfg.weekly_chart) {
+        block.appendChild(
+          renderWeeklyChart(cfg.weekly_chart, `Weekly usage & cost — ${cfg.plan_name}`)
+        );
       }
 
       resultsDiv.appendChild(block);
