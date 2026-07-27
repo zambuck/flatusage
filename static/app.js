@@ -267,14 +267,13 @@ function renderWeeklyChart(data, title) {
   const categories = data.categories || Object.keys(data.cost_series);
   const costSeries = data.cost_series;
 
-  const maxKwh = Math.max(...(kwh.length ? kwh : [0]), 0.1);
-  const maxCost = Math.max(data.max_cost || 0, 0.1);
-
   const margin = { top: 30, right: 70, bottom: 90, left: 70 };
   const slot = 28;
-  const chartHeight = 260;
+  const chartHeight = 260;       // total vertical span
+  const half = chartHeight / 2;  // distance from axis to top/bottom edges
   const width = Math.max(720, margin.left + labels.length * slot + margin.right);
   const height = chartHeight + margin.top + margin.bottom;
+  const baseline = margin.top + half;
 
   function fmt(n) {
     return n.toLocaleString(undefined, { maximumFractionDigits: 1 });
@@ -284,10 +283,10 @@ function renderWeeklyChart(data, title) {
   }
 
   function kwhY(v) {
-    return chartHeight * (v / maxKwh);
+    return half * (v / Math.max(maxKwh, 0.1));
   }
   function costY(v) {
-    return chartHeight * (v / maxCost);
+    return half * (v / Math.max(maxCost, 0.1));
   }
 
   function ticks(max) {
@@ -307,6 +306,8 @@ function renderWeeklyChart(data, title) {
     return out;
   }
 
+  const maxKwh = Math.max(...(kwh.length ? kwh : [0]), 0.1);
+  const maxCost = Math.max(data.max_cost || 0, 0.1);
   const kwhTicks = ticks(maxKwh);
   const costTicks = ticks(maxCost);
 
@@ -315,15 +316,15 @@ function renderWeeklyChart(data, title) {
     return colorForPeriod(cat);
   }
 
-  const baseline = margin.top + chartHeight;
-
   let svg = `<svg viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg">`;
 
+  // central horizontal axis
   svg += `<line class="weekly-axis" x1="${margin.left}" y1="${baseline}" x2="${width - margin.right}" y2="${baseline}" />`;
 
+  // grid lines: cost ticks above, kWh ticks below
   kwhTicks.forEach((t) => {
     if (t === 0) return;
-    const y = baseline - kwhY(t);
+    const y = baseline + kwhY(t);
     svg += `<line class="weekly-grid" x1="${margin.left}" y1="${y}" x2="${width - margin.right}" y2="${y}" />`;
   });
   costTicks.forEach((t) => {
@@ -332,29 +333,34 @@ function renderWeeklyChart(data, title) {
     svg += `<line class="weekly-grid" x1="${margin.left}" y1="${y}" x2="${width - margin.right}" y2="${y}" />`;
   });
 
+  // left axis labels: kWh usage (below axis)
   kwhTicks.forEach((t) => {
-    const y = baseline - kwhY(t);
+    const y = baseline + kwhY(t);
     svg += `<text class="weekly-axis-label" x="${margin.left - 6}" y="${y + 3}" text-anchor="end">${fmt(t)}</text>`;
   });
-  svg += `<text class="weekly-axis-label" transform="rotate(-90, ${margin.left - 45}, ${baseline - chartHeight / 2})" x="${margin.left - 45}" y="${baseline - chartHeight / 2}" text-anchor="middle">kWh usage per week</text>`;
+  svg += `<text class="weekly-axis-label" transform="rotate(-90, ${margin.left - 45}, ${baseline + half / 2})" x="${margin.left - 45}" y="${baseline + half / 2}" text-anchor="middle">kWh usage per week</text>`;
 
+  // right axis labels: cost (above axis)
   costTicks.forEach((t) => {
     const y = baseline - costY(t);
     svg += `<text class="weekly-axis-label" x="${width - margin.right + 6}" y="${y + 3}" text-anchor="start">${fmtMoney(t)}</text>`;
   });
-  svg += `<text class="weekly-axis-label" transform="rotate(90, ${width - margin.right + 45}, ${baseline - chartHeight / 2})" x="${width - margin.right + 45}" y="${baseline - chartHeight / 2}" text-anchor="middle">Cost per week ($)</text>`;
+  svg += `<text class="weekly-axis-label" transform="rotate(90, ${width - margin.right + 45}, ${baseline - half / 2})" x="${width - margin.right + 45}" y="${baseline - half / 2}" text-anchor="middle">Cost per week ($)</text>`;
 
   const barW = Math.max(6, slot - 8);
 
+  // bars
   labels.forEach((label, i) => {
     const cx = margin.left + i * slot + slot / 2;
     const x = cx - barW / 2;
 
+    // kWh bar: downward from axis
     const kh = kwhY(kwh[i]);
-    svg += `<rect x="${x}" y="${baseline - kh}" width="${barW}" height="${kh}" fill="#6c757d" opacity="0.9" rx="2">
+    svg += `<rect x="${x}" y="${baseline}" width="${barW}" height="${kh}" fill="#6c757d" opacity="0.9" rx="2">
       <title>Week starting ${label}\nUsage: ${fmt(kwh[i])} kWh</title>
     </rect>`;
 
+    // cost bars: stacked upward from axis
     let cum = 0;
     categories.forEach((cat) => {
       const val = costSeries[cat][i];
@@ -368,10 +374,12 @@ function renderWeeklyChart(data, title) {
     });
   });
 
+  // x-axis week labels below the kWh bars
+  const labelY = baseline + half + 16;
   labels.forEach((label, i) => {
     const cx = margin.left + i * slot + slot / 2;
     if (labels.length > 30 && i % 2 !== 0) return;
-    svg += `<text class="weekly-x-label" transform="rotate(-45, ${cx}, ${baseline + 14})" x="${cx}" y="${baseline + 14}">${label}</text>`;
+    svg += `<text class="weekly-x-label" transform="rotate(-45, ${cx}, ${labelY})" x="${cx}" y="${labelY}">${label}</text>`;
   });
 
   svg += `</svg>`;
