@@ -209,115 +209,37 @@ def apply_tariff(records, tariff, register_filter=None):
     """
     export_register = is_export_register(register_filter)
 
-    # Normalise daily blocks and sort by limit so tiers apply in order.
-    raw_blocks = tariff.get("blocks", [])
-    blocks = []
-    for b in raw_blocks:
-        period = b.get("period", "daily")
-        if period not in ("daily", "monthly"):
-            raise ValueError(f"Block period must be 'daily' or 'monthly', got {period!r}")
-        if period == "monthly":
-            raise ValueError("Monthly blocks are not yet supported; use daily blocks only.")
-        limit = b.get("limit_kwh")
-        rate = b.get("rate")
-        if not isinstance(limit, (int, float)) or limit < 0:
-            raise ValueError("Each block must specify a numeric 'limit_kwh' >= 0")
-        if not isinstance(rate, (int, float)):
-            raise ValueError("Each block must specify a numeric 'rate'")
-        blocks.append({"limit_kwh": float(limit), "rate": float(rate), "period": period})
-    blocks.sort(key=lambda b: b["limit_kwh"])
-
     detail = []
     summary = defaultdict(lambda: {"kwh": 0.0, "cost": 0.0, "intervals": 0})
     daily = defaultdict(lambda: {"kwh": 0.0, "cost": 0.0})
     monthly = defaultdict(lambda: {"kwh": 0.0, "cost": 0.0})
 
-    daily_cumulative = defaultdict(float)
-
-    for r in sorted(records, key=lambda rec: (rec["date"], rec["time"])):
+    for r in records:
         if register_filter and r["register"] != register_filter:
             continue
 
-        period_name, base_rate = classify_interval(r["date"], r["time"], tariff)
-
+        period_name, rate = classify_interval(r["date"], r["time"], tariff)
+        cost = r["kwh"] * rate
         if export_register:
-            # Solar/export feed-in: treat as a credit, no blocks apply.
-            cost = -abs(r["kwh"] * base_rate)
-            row = dict(r)
-            row["period"] = period_name
-            row["rate"] = base_rate
-            row["cost"] = cost
-            detail.append(row)
+            # Solar/export feed-in: cost is a credit (negative).
+            cost = -abs(cost)
 
-            summary[period_name]["kwh"] += r["kwh"]
-            summary[period_name]["cost"] += cost
-            summary[period_name]["intervals"] += 1
+        row = dict(r)
+        row["period"] = period_name
+        row["rate"] = rate
+        row["cost"] = cost
+        detail.append(row)
 
-            daily[r["date"]]["kwh"] += r["kwh"]
-            daily[r["date"]]["cost"] += cost
+        summary[period_name]["kwh"] += r["kwh"]
+        summary[period_name]["cost"] += cost
+        summary[period_name]["intervals"] += 1
 
-            month_key = f"{r['date'].year:04d}-{r['date'].month:02d}"
-            monthly[month_key]["kwh"] += r["kwh"]
-            monthly[month_key]["cost"] += cost
-            continue
+        daily[r["date"]]["kwh"] += r["kwh"]
+        daily[r["date"]]["cost"] += cost
 
-        # Apply daily blocks by splitting the interval into synthetic
-        # "block" rows and regular TOU rows when crossing thresholds.
-        kwh_remaining = r["kwh"]
-        day = r["date"]
-        month_key = f"{day.year:04d}-{day.month:02d}"
-
-        for block in blocks:
-            limit = block["limit_kwh"]
-            rate = block["rate"]
-            used = daily_cumulative[day]
-            if used >= limit:
-                continue
-            available = limit - used
-            kwh_in_block = min(kwh_remaining, available)
-            if kwh_in_block <= 0:
-                continue
-
-            block_cost = kwh_in_block * rate
-            block_row = dict(r)
-            block_row["kwh"] = kwh_in_block
-            block_row["period"] = "block"
-            block_row["rate"] = rate
-            block_row["cost"] = block_cost
-            detail.append(block_row)
-
-            summary["block"]["kwh"] += kwh_in_block
-            summary["block"]["cost"] += block_cost
-            summary["block"]["intervals"] += 1
-
-            daily[day]["kwh"] += kwh_in_block
-            daily[day]["cost"] += block_cost
-            monthly[month_key]["kwh"] += kwh_in_block
-            monthly[month_key]["cost"] += block_cost
-
-            kwh_remaining -= kwh_in_block
-            daily_cumulative[day] += kwh_in_block
-
-        # Remaining energy at the normal TOU rate.
-        if kwh_remaining > 0:
-            period_cost = kwh_remaining * base_rate
-            row = dict(r)
-            row["kwh"] = kwh_remaining
-            row["period"] = period_name
-            row["rate"] = base_rate
-            row["cost"] = period_cost
-            detail.append(row)
-
-            summary[period_name]["kwh"] += kwh_remaining
-            summary[period_name]["cost"] += period_cost
-            summary[period_name]["intervals"] += 1
-
-            daily[day]["kwh"] += kwh_remaining
-            daily[day]["cost"] += period_cost
-            monthly[month_key]["kwh"] += kwh_remaining
-            monthly[month_key]["cost"] += period_cost
-
-            daily_cumulative[day] += kwh_remaining
+        month_key = f"{r['date'].year:04d}-{r['date'].month:02d}"
+        monthly[month_key]["kwh"] += r["kwh"]
+        monthly[month_key]["cost"] += cost
 
     supply_charge_total = 0.0
     if tariff.get("daily_supply_charge_dollars"):
@@ -333,6 +255,7 @@ def apply_tariff(records, tariff, register_filter=None):
             monthly[m_key]["cost"] += charge * n_days_in_month
 
     return detail, summary, daily, monthly, supply_charge_total
+
 
 # ---------------------------------------------------------------------------
 # COMBINED CONFIG HELPERS
@@ -354,11 +277,7 @@ def get_register_tariff(tariff, register):
             f"Available registers: {', '.join(sorted(tariff['registers'].keys()))}"
         )
 
-    # Start with top-level config so keys like 'blocks' are inherited,
-    # then let register-specific settings override.
-    single = dict(tariff)
-    single.update(register_config)
-    single.pop("registers", None)
+    single = dict(register_config)
     single.setdefault("periods", [])
     plan_name = tariff.get("plan_name", "(unnamed plan)")
     label = register_label(register, register_config)
@@ -476,16 +395,8 @@ def describe_periods(tariff):
             "windows": "(any time not matched above)",
             "rate": tariff["default_rate"],
         })
-    for block in tariff.get("blocks", []):
-        period = block.get("period", "daily")
-        rows.append({
-            "name": "block",
-            "days": period,
-            "months": "",
-            "windows": f"first {fmt_num(block['limit_kwh'], 2)} kWh",
-            "rate": block["rate"],
-        })
     return rows
+
 
 def write_detail_csv(path, detail):
     with open(path, "w", newline="") as f:
