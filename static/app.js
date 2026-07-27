@@ -151,6 +151,10 @@ const periodColorCache = {};
 
 function colorForPeriod(period) {
   if (!period) return "#d0d7de";
+  const lower = period.toLowerCase();
+  if (lower.includes("peak") && !lower.includes("off-peak")) {
+    return "#dc2626";
+  }
   if (!periodColorCache[period]) {
     const idx = Object.keys(periodColorCache).length % PERIOD_PALETTE.length;
     periodColorCache[period] = PERIOD_PALETTE[idx];
