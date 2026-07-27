@@ -456,12 +456,19 @@ def register_tariff_for(tariff, register):
 
 def parse_detail_weekly(path, tariff, register=None):
     """
-    Aggregate a detail CSV into ISO-calendar weeks.
+    Aggregate a detail CSV into ISO-calendar weeks, keeping register breakdowns.
     Period cost categories are prefixed with the register code so that
     E1 default and E2 default are not merged.
     Returns (weeks_dict, last_date) or (None, None) on failure.
     """
-    weekly = defaultdict(lambda: {"kwh": 0.0, "cost_by_period": defaultdict(float), "dates": set()})
+    weekly = defaultdict(
+        lambda: {
+            "kwh": 0.0,
+            "kwh_by_register": defaultdict(float),
+            "cost_by_period": defaultdict(float),
+            "dates": set(),
+        }
+    )
     last_date = None
     try:
         with open(path, newline="", encoding="utf-8") as f:
@@ -476,9 +483,11 @@ def parse_detail_weekly(path, tariff, register=None):
                     continue
                 iso = d.isocalendar()
                 week_key = (iso.year, iso.week)
+                reg_key = register if register else "Total"
                 if register:
                     period = f"{register} {period}"
                 weekly[week_key]["kwh"] += kwh
+                weekly[week_key]["kwh_by_register"][reg_key] += kwh
                 weekly[week_key]["cost_by_period"][period] += cost
                 weekly[week_key]["dates"].add(d)
                 if last_date is None or d > last_date:
@@ -497,6 +506,9 @@ def parse_detail_weekly(path, tariff, register=None):
         monday = date.fromisocalendar(year, week, 1)
         weeks[monday.isoformat()] = {
             "kwh": round(vals["kwh"], 3),
+            "kwh_by_register": {
+                r: round(k, 3) for r, k in vals["kwh_by_register"].items()
+            },
             "cost_by_period": {p: round(c, 2) for p, c in vals["cost_by_period"].items()},
             "supply_charge": round(supply_per_day * len(vals["dates"]), 2),
             "supply_key": supply_key,
@@ -507,11 +519,16 @@ def parse_detail_weekly(path, tariff, register=None):
 def build_weekly_chart(result_files, tariff):
     """
     Build the data structure for the last-12-months weekly diverging bar chart.
-    Cost categories are kept separate per register.
+    kWh is split by register and cost categories are kept separate per register.
     Returns None if no detail data is available.
     """
     aggregate = defaultdict(
-        lambda: {"kwh": 0.0, "period_costs": defaultdict(float), "supply": defaultdict(float)}
+        lambda: {
+            "kwh": 0.0,
+            "kwh_by_register": defaultdict(float),
+            "period_costs": defaultdict(float),
+            "supply": defaultdict(float),
+        }
     )
     global_last = None
 
@@ -529,6 +546,8 @@ def build_weekly_chart(result_files, tariff):
             global_last = last_date
         for week_start, vals in weeks.items():
             aggregate[week_start]["kwh"] += vals["kwh"]
+            for r, k in vals["kwh_by_register"].items():
+                aggregate[week_start]["kwh_by_register"][r] += k
             for p, c in vals["cost_by_period"].items():
                 aggregate[week_start]["period_costs"][p] += c
             aggregate[week_start]["supply"][vals["supply_key"]] += vals["supply_charge"]
@@ -544,9 +563,20 @@ def build_weekly_chart(result_files, tariff):
     if not labels:
         return None
 
-    kwh = [round(aggregate[l]["kwh"], 2) for l in labels]
+    # Order kWh registers by total usage (largest first).
+    kwh_totals = defaultdict(float)
+    for l in labels:
+        for r, k in aggregate[l]["kwh_by_register"].items():
+            kwh_totals[r] += k
+    kwh_categories = sorted(kwh_totals.keys(), key=lambda r: -kwh_totals[r])
 
-    # TOU period categories, ordered by total spend (largest first).
+    kwh_series = {
+        r: [round(aggregate[l]["kwh_by_register"].get(r, 0.0), 2) for l in labels]
+        for r in kwh_categories
+    }
+    max_kwh = max((max(v) for v in kwh_series.values()), default=0.0)
+
+    # Order cost categories by total spend (largest first).
     period_totals = defaultdict(float)
     for l in labels:
         for p, c in aggregate[l]["period_costs"].items():
@@ -575,10 +605,11 @@ def build_weekly_chart(result_files, tariff):
 
     return {
         "labels": labels,
-        "kwh": kwh,
+        "kwh_series": kwh_series,
+        "kwh_categories": kwh_categories,
         "cost_series": cost_series,
         "categories": categories,
-        "max_kwh": max(kwh) if kwh else 0,
+        "max_kwh": round(max_kwh, 2),
         "max_cost": round(max_cost, 2),
     }
 
