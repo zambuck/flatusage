@@ -307,25 +307,49 @@ function renderWeeklyChart(data, title) {
     return half * (v / maxCost);
   }
 
-  function ticks(max) {
-    const rawStep = max / 4;
-    if (rawStep === 0) return [0];
-    const exp = Math.floor(Math.log10(rawStep));
-    const frac = rawStep / Math.pow(10, exp);
-    let niceFrac = frac <= 1 ? 1 : frac <= 2 ? 2 : frac <= 5 ? 5 : 10;
-    const step = niceFrac * Math.pow(10, exp);
-    const out = [];
-    for (let i = 0; i <= 6; i++) {
-      const v = i * step;
-      if (v > max * 1.01) break;
-      out.push(v);
+  // Nice tick-step generator that guarantees at least targetCount+1 labels.
+  function niceTicks(max, targetCount) {
+    if (max <= 0) return [0];
+    const raw = max / targetCount;
+    const exp = Math.floor(Math.log10(raw));
+    const candidates = [];
+    for (let e = exp - 1; e <= exp + 1; e++) {
+      const base = Math.pow(10, e);
+      [1, 2, 5].forEach((m) => candidates.push(m * base));
     }
-    if (out.length === 0) out.push(max);
-    return out;
+    let best = null;
+    let bestCount = Infinity;
+    for (const step of candidates) {
+      if (step <= 0) continue;
+      const ticks = [];
+      for (let i = 0; ; i++) {
+        const v = i * step;
+        if (v > max * 1.0001) break;
+        ticks.push(v);
+      }
+      const count = ticks.length;
+      if (count >= targetCount + 1) {
+        if (best === null || count < bestCount) {
+          best = ticks;
+          bestCount = count;
+        }
+      }
+    }
+    if (best === null) {
+      const step = raw;
+      const ticks = [];
+      for (let i = 0; i <= targetCount; i++) {
+        const v = i * step;
+        if (v > max) break;
+        ticks.push(v);
+      }
+      best = ticks;
+    }
+    return best;
   }
 
-  const kwhTicks = ticks(maxKwh);
-  const costTicks = ticks(maxCost);
+  const kwhTicks = niceTicks(maxKwh, 4);
+  const costTicks = niceTicks(maxCost, 4);
 
   function costColor(cat) {
     if (cat.toLowerCase().endsWith(" supply")) return "#444c56";
@@ -337,7 +361,13 @@ function renderWeeklyChart(data, title) {
   // central horizontal axis
   svg += `<line class="weekly-axis" x1="${margin.left}" y1="${baseline}" x2="${width - margin.right}" y2="${baseline}" />`;
 
-  // grid lines
+  // vertical dotted guides at each week (behind the bars)
+  labels.forEach((_, i) => {
+    const x = margin.left + i * slot + slot / 2;
+    svg += `<line class="weekly-grid" x1="${x}" y1="${margin.top}" x2="${x}" y2="${margin.top + chartHeight}" />`;
+  });
+
+  // horizontal grid lines
   kwhTicks.forEach((t) => {
     if (t === 0) return;
     const y = baseline + kwhY(t);
