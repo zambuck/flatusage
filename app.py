@@ -371,6 +371,75 @@ def parse_summary_totals(path):
     return totals if totals else None
 
 
+def parse_detail_load_profile(path):
+    """
+    Build an hour-of-day x day-of-week average kWh grid, plus the most common
+    TOU period active in each hour, from a per-interval detail CSV.
+    Returns None if the file is missing, empty, or unreadable.
+    """
+    sums = [[0.0] * 24 for _ in range(7)]
+    counts = [[0] * 24 for _ in range(7)]
+    period_hour_counts = [dict() for _ in range(24)]
+
+    try:
+        with open(path, newline="", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                try:
+                    d = datetime.strptime(row["date"], "%Y-%m-%d").date()
+                    hour = int(row["time"].split(":")[0])
+                    kwh = float(row["kwh"])
+                except (KeyError, ValueError):
+                    continue
+                weekday = d.weekday()
+                sums[weekday][hour] += kwh
+                counts[weekday][hour] += 1
+                period = row.get("period") or "unknown"
+                period_hour_counts[hour][period] = period_hour_counts[hour].get(period, 0) + 1
+    except (OSError, csv.Error):
+        return None
+
+    grid = []
+    has_data = False
+    for weekday in range(7):
+        row_out = []
+        for hour in range(24):
+            n = counts[weekday][hour]
+            if n:
+                has_data = True
+                # Readings are per 30-min interval; x2 to express as an hourly kWh rate.
+                row_out.append(round(sums[weekday][hour] / n * 2, 4))
+            else:
+                row_out.append(0.0)
+        grid.append(row_out)
+
+    if not has_data:
+        return None
+
+    period_by_hour = []
+    for hour in range(24):
+        hour_counts = period_hour_counts[hour]
+        period_by_hour.append(max(hour_counts, key=hour_counts.get) if hour_counts else None)
+
+    return {"grid": grid, "period_by_hour": period_by_hour}
+
+
+def build_load_profiles(result_files):
+    """Find detail_*.csv (or detail.csv) files among a job's outputs and build
+    a load profile for each register found."""
+    profiles = {}
+    for fpath in result_files:
+        fname = os.path.basename(fpath)
+        stem = os.path.splitext(fname)[0]
+        if stem != "detail" and not stem.startswith("detail_"):
+            continue
+        register = stem[len("detail"):].lstrip("_") or "All"
+        profile = parse_detail_load_profile(fpath)
+        if profile:
+            profiles[register] = profile
+    return profiles
+
+
 def clean_zip_name(filename):
     base = os.path.splitext(os.path.basename(filename))[0]
     base = re.sub(r"[_\-\s.]*(config|configs|configuration)[_\-\s.]*", "", base, flags=re.IGNORECASE)
@@ -611,6 +680,7 @@ def calculate():
                     summary_totals.append({**totals, "summary_file": fname})
 
         zip_name = clean_zip_name(original_name)
+        load_profiles = build_load_profiles(result_files)
         results.append(
             {
                 "label": label,
@@ -621,6 +691,7 @@ def calculate():
                 "output": stdout,
                 "files": file_entries,
                 "summary_totals": summary_totals,
+                "load_profiles": load_profiles,
             }
         )
 
