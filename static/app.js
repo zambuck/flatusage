@@ -385,11 +385,15 @@ function renderWeeklyChart(data, title) {
     if (t === 0) return;
     const y = baseline + kwhY(t);
     svg += `<line class="weekly-grid" x1="${margin.left}" y1="${y}" x2="${width - margin.right}" y2="${y}" />`;
+    const yUp = baseline - kwhY(t);
+    svg += `<line class="weekly-grid" x1="${margin.left}" y1="${yUp}" x2="${width - margin.right}" y2="${yUp}" />`;
   });
   costTicks.forEach((t) => {
     if (t === 0) return;
     const y = baseline - costY(t);
     svg += `<line class="weekly-grid" x1="${margin.left}" y1="${y}" x2="${width - margin.right}" y2="${y}" />`;
+    const yDown = baseline + costY(t);
+    svg += `<line class="weekly-grid" x1="${margin.left}" y1="${yDown}" x2="${width - margin.right}" y2="${yDown}" />`;
   });
 
   // left axis labels: kWh
@@ -399,7 +403,6 @@ function renderWeeklyChart(data, title) {
     const yUp = baseline - kwhY(t);
     svg += `<text class="weekly-axis-label" x="${margin.left - 6}" y="${yUp + 3}" text-anchor="end">${fmt(t)}</text>`;
   });
-  // left axis titles
   svg += `<text class="weekly-axis-label" transform="rotate(-90, ${margin.left - 45}, ${baseline + half / 2})" x="${margin.left - 45}" y="${baseline + half / 2}" text-anchor="middle">kWh used</text>`;
   svg += `<text class="weekly-axis-label" transform="rotate(90, ${margin.left - 45}, ${baseline - half / 2})" x="${margin.left - 45}" y="${baseline - half / 2}" text-anchor="middle">kWh exported</text>`;
 
@@ -410,18 +413,20 @@ function renderWeeklyChart(data, title) {
     const yDown = baseline + costY(t);
     svg += `<text class="weekly-axis-label" x="${width - margin.right + 6}" y="${yDown + 3}" text-anchor="start">${fmtMoney(t)}</text>`;
   });
-  // right axis titles
   svg += `<text class="weekly-axis-label" transform="rotate(90, ${width - margin.right + 45}, ${baseline - half / 2})" x="${width - margin.right + 45}" y="${baseline - half / 2}" text-anchor="middle">Cost ($)</text>`;
   svg += `<text class="weekly-axis-label" transform="rotate(-90, ${width - margin.right + 45}, ${baseline + half / 2})" x="${width - margin.right + 45}" y="${baseline + half / 2}" text-anchor="middle">Credits ($)</text>`;
 
   const barW = Math.max(6, slot - 8);
+  const halfW = barW / 2;
 
   labels.forEach((label, i) => {
     const cx = margin.left + i * slot + slot / 2;
-    const x = cx - barW / 2;
+    // kWh bar starts at the left half of the slot
+    const xKwh = cx - halfW / 2;
+    // cost bar sits in the right half
+    const xCost = cx + halfW / 2;
 
-    // kWh bars
-    //   consumption downward, export upward
+    // kWh bars: left half
     let kwhDownCum = 0;
     let kwhUpCum = 0;
     kwhCategories.forEach((reg) => {
@@ -431,20 +436,19 @@ function renderWeeklyChart(data, title) {
       if (exportRegisters.has(reg)) {
         const y = baseline - kwhUpCum - h;
         kwhUpCum += h;
-        svg += `<rect x="${x}" y="${y}" width="${barW}" height="${h}" fill="${colorForRegister(reg)}" opacity="0.9" rx="2">
+        svg += `<rect x="${xKwh}" y="${y}" width="${halfW}" height="${h}" fill="${colorForRegister(reg)}" opacity="0.9" rx="1">
           <title>Week starting ${label}\n${reg} exported: ${fmt(val)} kWh</title>
         </rect>`;
       } else {
         const y = baseline + kwhDownCum;
         kwhDownCum += h;
-        svg += `<rect x="${x}" y="${y}" width="${barW}" height="${h}" fill="${colorForRegister(reg)}" opacity="0.9" rx="2">
+        svg += `<rect x="${xKwh}" y="${y}" width="${halfW}" height="${h}" fill="${colorForRegister(reg)}" opacity="0.9" rx="1">
           <title>Week starting ${label}\n${reg} usage: ${fmt(val)} kWh</title>
         </rect>`;
       }
     });
 
-    // cost bars
-    //   consumption costs upward, export credits downward
+    // cost bars: right half
     let costUpCum = 0;
     let costDownCum = 0;
     costCategories.forEach((cat) => {
@@ -454,13 +458,13 @@ function renderWeeklyChart(data, title) {
       if (exportCostCats.has(cat)) {
         const y = baseline + costDownCum;
         costDownCum += h;
-        svg += `<rect x="${x}" y="${y}" width="${barW}" height="${h}" fill="${costColor(cat)}" opacity="0.9" rx="2">
+        svg += `<rect x="${xCost}" y="${y}" width="${halfW}" height="${h}" fill="${costColor(cat)}" opacity="0.9" rx="1">
           <title>Week starting ${label}\n${cat} credit: ${fmtMoney(val)}</title>
         </rect>`;
       } else {
         const y = baseline - costUpCum - h;
         costUpCum += h;
-        svg += `<rect x="${x}" y="${y}" width="${barW}" height="${h}" fill="${costColor(cat)}" opacity="0.9" rx="2">
+        svg += `<rect x="${xCost}" y="${y}" width="${halfW}" height="${h}" fill="${costColor(cat)}" opacity="0.9" rx="1">
           <title>Week starting ${label}\n${cat}: ${fmtMoney(val)}</title>
         </rect>`;
       }
