@@ -1,0 +1,14 @@
+plan_name: "Power House Flat Rate PSH1060116MRE2"
+
+registers:
+  E1:
+    label: "General Usage"
+    daily_supply_charge_dollars: 0.8766
+
+    default_rate: 0.3191
+
+  B1:
+    label: "Solar"
+    daily_supply_charge_dollars: 0.0
+    periods: []
+    default_rate: 0.01
