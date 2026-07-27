@@ -153,7 +153,10 @@ function colorForPeriod(period) {
   if (!period) return "#d0d7de";
   const lower = period.toLowerCase();
   if (lower.includes("peak") && !lower.includes("off-peak")) {
-    return "#dc2626";
+    if (!periodColorCache[period]) {
+      periodColorCache[period] = "#dc2626";
+    }
+    return periodColorCache[period];
   }
   if (!periodColorCache[period]) {
     const idx = Object.keys(periodColorCache).length % PERIOD_PALETTE.length;
@@ -235,6 +238,7 @@ function renderLoadProfile(register, profile) {
     wrap.appendChild(row);
   });
 
+  const seenPeriods = [...new Set(profile.period_by_hour.filter(Boolean))];
   const legend = document.createElement("div");
   legend.className = "heatmap-legend";
   legend.innerHTML = `
@@ -242,12 +246,13 @@ function renderLoadProfile(register, profile) {
       Low <span class="scale-bar"></span> High
     </span>
     <span class="legend-periods">
-      ${Object.keys(periodColorCache)
-        .map((p) => `<span class="legend-swatch" style="background:${periodColorCache[p]}"></span>${p}`)
+      ${seenPeriods
+        .map((p) => `<span class="legend-swatch" style="background:${colorForPeriod(p)}"></span>${p}`)
         .join(" ")}
     </span>
   `;
   wrap.appendChild(legend);
+
 
   return wrap;
 }
