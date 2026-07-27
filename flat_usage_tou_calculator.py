@@ -607,13 +607,13 @@ def main():
             )
 
         filtered_dates = sorted({r["date"] for r in detail})
-            print(f"\n{'='*60}")
-            print(f"Register: {register} — {label}")
-            if is_export_register(register):
-                print("  (export/solar register — costs shown as credits)")
-            print(f"{'='*60}")
-            print(f"  Intervals used: {fmt_int(len(detail))}")
-            print(f"  Days with data: {fmt_int(len(daily))} ({filtered_dates[0]} to {filtered_dates[-1]})")
+        print(f"\n{'='*60}")
+        print(f"Register: {register} — {label}")
+        if is_export_register(register):
+            print("  (export/solar register — costs shown as credits)")
+        print(f"{'='*60}")
+        print(f"  Intervals used: {fmt_int(len(detail))}")
+        print(f"  Days with data: {fmt_int(len(daily))} ({filtered_dates[0]} to {filtered_dates[-1]})")
 
 
         total_kwh, total_cost, supply = print_console_summary(
