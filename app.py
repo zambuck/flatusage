@@ -70,10 +70,19 @@ ALLOWED_TOP_KEYS = {
     "periods",
     "registers",
     "default_rate",
+    "export_daily_tiers",
 }
+
+ALLOWED_REGISTER_KEYS = {
+    "label",
+    "daily_supply_charge_dollars",
+    "periods",
+    "default_rate",
+    "export_daily_tiers",
+}
+
 ALLOWED_PERIOD_KEYS = {"name", "months", "days", "windows", "rate"}
 ALLOWED_WINDOW_KEYS = {"start", "end"}
-ALLOWED_REGISTER_KEYS = {"label", "daily_supply_charge_dollars", "periods", "default_rate"}
 
 CSV_INJECTION_CHARS = ("=", "+", "-", "@", "\t", "\r")
 
@@ -223,6 +232,10 @@ def validate_tariff(data):
                 if key not in ALLOWED_WINDOW_KEYS:
                     raise ValueError(f"Unexpected window key: {key}")
 
+    export_tiers = data.get("export_daily_tiers")
+    if export_tiers is not None:
+        validate_export_tiers(export_tiers)
+
     registers = data.get("registers")
     if registers is not None:
         if not isinstance(registers, dict):
@@ -233,6 +246,53 @@ def validate_tariff(data):
             for key in register_config:
                 if key not in ALLOWED_REGISTER_KEYS:
                     raise ValueError(f"Unexpected register key: {key}")
+            for period in register_config.get("periods", []):
+                if not isinstance(period, dict):
+                    raise ValueError("Each period must be a mapping")
+                for key in period:
+                    if key not in ALLOWED_PERIOD_KEYS:
+                        raise ValueError(f"Unexpected period key: {key}")
+                for window in period.get("windows", []):
+                    if not isinstance(window, dict):
+                        raise ValueError("Each window must be a mapping")
+                    for key in window:
+                        if key not in ALLOWED_WINDOW_KEYS:
+                            raise ValueError(f"Unexpected window key: {key}")
+            reg_tiers = register_config.get("export_daily_tiers")
+            if reg_tiers is not None:
+                validate_export_tiers(reg_tiers)
+
+def validate_export_tiers(tiers):
+    """
+    Validate an export_daily_tiers list.
+    up_to_kwh values are cumulative daily thresholds and must increase.
+    """
+    if not isinstance(tiers, list) or not tiers:
+        raise ValueError("export_daily_tiers must be a non-empty list")
+    prev_upper = 0.0
+    seen_unlimited = False
+    for i, tier in enumerate(tiers):
+        if not isinstance(tier, dict):
+            raise ValueError(f"export_daily_tiers entry {i} must be a mapping")
+        for key in tier:
+            if key not in {"up_to_kwh", "rate"}:
+                raise ValueError(f"Unexpected export_daily_tiers key: {key}")
+        if "rate" not in tier:
+            raise ValueError(f"export_daily_tiers entry {i} must include 'rate'")
+        if not isinstance(tier["rate"], (int, float)):
+            raise ValueError(f"export_daily_tiers entry {i} rate must be numeric")
+        has_upper = "up_to_kwh" in tier
+        if has_upper:
+            if seen_unlimited:
+                raise ValueError("export_daily_tiers: tiers with up_to_kwh must come before the unlimited final tier")
+            upper = tier["up_to_kwh"]
+            if not isinstance(upper, (int, float)) or upper <= prev_upper:
+                raise ValueError(f"export_daily_tiers entry {i} up_to_kwh must be a number greater than {prev_upper}")
+            prev_upper = upper
+        else:
+            if seen_unlimited:
+                raise ValueError("export_daily_tiers: only one unlimited final tier is allowed")
+            seen_unlimited = True
 
 
 def sanitize_tariff(data):
