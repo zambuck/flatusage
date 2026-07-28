@@ -371,23 +371,24 @@ function renderWeeklyChart(data, title) {
   const kwhTicks = niceTicks(maxKwh, 4);
   const costTicks = niceTicks(maxCost, 4);
 
-  function costColor(cat) {
-    if (cat.toLowerCase().endsWith(" supply")) return "#444c56";
-    for (const reg of exportRegisters) {
-      if (cat.startsWith(reg + " ")) {
-        // Export feed-in credits: distinct from the kWh export colour.
-        return "#2ea44f";
-      }
+function costColor(cat) {
+  if (cat.toLowerCase().endsWith(" supply")) return "#444c56";
+  for (const reg of exportRegisters) {
+    if (cat.startsWith(reg + " ")) {
+      // Export feed-in credits: colour by the underlying period/tier name.
+      const base = cat.slice(reg.length + 1);
+      return colorForPeriod(base);
     }
-    let base = cat;
-    for (const reg of kwhCategories) {
-      if (base.startsWith(reg + " ")) {
-        base = base.slice(reg.length + 1);
-        break;
-      }
-    }
-    return colorForPeriod(base);
   }
+  let base = cat;
+  for (const reg of kwhCategories) {
+    if (base.startsWith(reg + " ")) {
+      base = base.slice(reg.length + 1);
+      break;
+    }
+  }
+  return colorForPeriod(base);
+}
 
   let svg = `<svg viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg">`;
 
