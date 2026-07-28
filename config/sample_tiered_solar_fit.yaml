@@ -1,0 +1,19 @@
+plan_name: "8c/3c Solar Feed-in"
+daily_supply_charge_dollars: 1.20
+periods:
+  - name: peak
+    days: weekday
+    windows:
+      - start: "4pm"
+        end: "9pm"
+    rate: 0.35
+  - name: off_peak
+    windows:
+      - start: "9pm"
+        end: "4pm"
+    rate: 0.15
+
+export_daily_tiers:
+  - up_to_kwh: 8.0   # first 8 kWh exported today at 8 c/kWh
+    rate: 0.08
+  - rate: 0.03       # everything after 8 kWh at 3 c/kWh
