@@ -9,7 +9,7 @@ registers:
         windows:
           - start: "4pm"
             end: "9pm"
-        rate: 0.35
+    default_rate: 0.3844
   B1:
     label: "Solar Export"
     export_daily_tiers:
