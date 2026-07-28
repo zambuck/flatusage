@@ -257,6 +257,28 @@ def sanitize_tariff(data):
 # CSV PARSING
 # ---------------------------------------------------------------------------
 
+def _parse_csv_timestamp(s):
+    """
+    Try several common flat-CSV timestamp formats.
+    Returns a datetime or None if none match.
+    """
+    formats = [
+        "%d/%m/%Y %I:%M:%S %p",   # 27/07/2024 1:00:00 PM
+        "%d/%m/%Y %I:%M %p",      # 27/07/2024 1:00 PM
+        "%d/%m/%Y %H:%M:%S",      # 27/07/2024 13:00:00
+        "%d/%m/%Y %H:%M",         # 27/07/2024 13:00
+        "%Y-%m-%d %H:%M:%S",      # 2024-07-27 13:00:00
+        "%Y-%m-%dT%H:%M:%S",      # 2024-07-27T13:00:00
+        "%Y-%m-%d %H:%M",         # 2024-07-27 13:00
+        "%Y-%m-%dT%H:%M",         # 2024-07-27T13:00
+    ]
+    for fmt in formats:
+        try:
+            return datetime.strptime(s.strip(), fmt)
+        except ValueError:
+            continue
+    return None
+
 
 def parse_csv_date_range(file_storage):
     text = io.StringIO(file_storage.stream.read().decode("utf-8-sig"))
@@ -270,12 +292,12 @@ def parse_csv_date_range(file_storage):
 
     dates = set()
     for row in reader:
-        if row.get("StartDate"):
-            try:
-                dt = datetime.strptime(row["StartDate"].strip(), "%d/%m/%Y %I:%M:%S %p")
+        raw = row.get("StartDate")
+        if raw:
+            dt = _parse_csv_timestamp(raw)
+            if dt:
                 dates.add(dt.date())
-            except ValueError:
-                pass
+
     if not dates:
         raise ValueError("No valid StartDate values found in CSV")
     return min(dates), max(dates), len(dates)
