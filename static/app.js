@@ -372,10 +372,9 @@ function renderWeeklyChart(data, title) {
   const costTicks = niceTicks(maxCost, 4);
 
 function costColor(cat) {
-  if (cat.toLowerCase().endsWith(" supply")) return "#444c56";
+  if (cat.toLowerCase().includes("supply")) return "#444c56";
   for (const reg of exportRegisters) {
     if (cat.startsWith(reg + " ")) {
-      // Export feed-in credits: colour by the underlying period/tier name.
       const base = cat.slice(reg.length + 1);
       return colorForPeriod(base);
     }
