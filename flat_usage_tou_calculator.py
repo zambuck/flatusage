@@ -197,49 +197,95 @@ def classify_interval(d: date, t: dtime, tariff):
         f"No tariff period matched {d} {t} and no 'default_rate' set in config."
     )
 
+def split_interval_across_tiers(kwh, cumulative_before, tiers):
+    """
+    Split an interval's export kWh across cumulative daily export tiers.
+    Returns a list of (tier_name, kwh_in_tier, rate_in_tier) tuples.
+    """
+    remaining = kwh
+    cumulative = cumulative_before
+    results = []
+    for i, tier in enumerate(tiers):
+        upper = tier.get("up_to_kwh")
+        rate = tier["rate"]
+        if upper is None:
+            if remaining > 0:
+                results.append((f"tier{i+1}", remaining, rate))
+            return results
+        room = upper - cumulative
+        if room <= 0:
+            continue
+        used = min(remaining, room)
+        if used > 0:
+            results.append((f"tier{i+1}", used, rate))
+            remaining -= used
+            cumulative += used
+        if remaining <= 0:
+            return results
+    return results
 
 def apply_tariff(records, tariff, register_filter=None):
-    """
-    Returns:
-      detail: list of records with added 'period', 'rate', and 'cost' fields
-      summary: dict of period -> {kwh, cost, intervals}
-      daily: dict of date -> {kwh, cost}
-      monthly: dict of 'YYYY-MM' -> {kwh, cost}
-      supply_charge_total: float
-    """
     export_register = is_export_register(register_filter)
+    export_tiers = tariff.get("export_daily_tiers") if export_register else None
 
     detail = []
     summary = defaultdict(lambda: {"kwh": 0.0, "cost": 0.0, "intervals": 0})
     daily = defaultdict(lambda: {"kwh": 0.0, "cost": 0.0})
     monthly = defaultdict(lambda: {"kwh": 0.0, "cost": 0.0})
+    daily_export_total = defaultdict(float)
 
     for r in records:
         if register_filter and r["register"] != register_filter:
             continue
 
-        period_name, rate = classify_interval(r["date"], r["time"], tariff)
-        cost = r["kwh"] * rate
-        if export_register:
-            # Solar/export feed-in: cost is a credit (negative).
-            cost = -abs(cost)
+        if export_tiers:
+            exported = abs(r["kwh"])
+            cumulative_before = daily_export_total[r["date"]]
+            splits = split_interval_across_tiers(exported, cumulative_before, export_tiers)
+            daily_export_total[r["date"]] += exported
 
-        row = dict(r)
-        row["period"] = period_name
-        row["rate"] = rate
-        row["cost"] = cost
-        detail.append(row)
+            for tier_name, tier_kwh, tier_rate in splits:
+                cost = -tier_kwh * tier_rate
+                row = dict(r)
+                row["kwh"] = tier_kwh
+                row["period"] = tier_name
+                row["rate"] = tier_rate
+                row["cost"] = cost
+                detail.append(row)
 
-        summary[period_name]["kwh"] += r["kwh"]
-        summary[period_name]["cost"] += cost
-        summary[period_name]["intervals"] += 1
+                summary[tier_name]["kwh"] += tier_kwh
+                summary[tier_name]["cost"] += cost
+                summary[tier_name]["intervals"] += 1
 
-        daily[r["date"]]["kwh"] += r["kwh"]
-        daily[r["date"]]["cost"] += cost
+                daily[r["date"]]["kwh"] += tier_kwh
+                daily[r["date"]]["cost"] += cost
 
-        month_key = f"{r['date'].year:04d}-{r['date'].month:02d}"
-        monthly[month_key]["kwh"] += r["kwh"]
-        monthly[month_key]["cost"] += cost
+                month_key = f"{r['date'].year:04d}-{r['date'].month:02d}"
+                monthly[month_key]["kwh"] += tier_kwh
+                monthly[month_key]["cost"] += cost
+        else:
+            period_name, rate = classify_interval(r["date"], r["time"], tariff)
+            cost = r["kwh"] * rate
+            if export_register:
+                # Solar/export feed-in: cost is a credit (negative).
+                cost = -abs(cost)
+
+            row = dict(r)
+            row["period"] = period_name
+            row["rate"] = rate
+            row["cost"] = cost
+            detail.append(row)
+
+            summary[period_name]["kwh"] += r["kwh"]
+            summary[period_name]["cost"] += cost
+            summary[period_name]["intervals"] += 1
+
+            daily[r["date"]]["kwh"] += r["kwh"]
+            daily[r["date"]]["cost"] += cost
+
+            month_key = f"{r['date'].year:04d}-{r['date'].month:02d}"
+            monthly[month_key]["kwh"] += r["kwh"]
+            monthly[month_key]["cost"] += cost
 
     supply_charge_total = 0.0
     if tariff.get("daily_supply_charge_dollars"):
@@ -375,10 +421,6 @@ def _month_name(n):
 
 
 def describe_periods(tariff):
-    """
-    Build a human-readable list of the TOU periods defined in the tariff
-    config for display in the summary output.
-    """
     rows = []
     for period in tariff.get("periods", []):
         days = period.get("days", "all")
@@ -400,8 +442,17 @@ def describe_periods(tariff):
             "windows": "(any time not matched above)",
             "rate": tariff["default_rate"],
         })
+    for i, tier in enumerate(tariff.get("export_daily_tiers", [])):
+        upper = tier.get("up_to_kwh")
+        desc = f"first {upper} kWh/day" if upper else "thereafter"
+        rows.append({
+            "name": f"tier{i+1}",
+            "days": "all",
+            "months": "",
+            "windows": desc,
+            "rate": tier["rate"],
+        })
     return rows
-
 
 def write_detail_csv(path, detail):
     with open(path, "w", newline="") as f:
