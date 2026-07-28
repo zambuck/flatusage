@@ -58,6 +58,11 @@ def register_label(register, register_config=None):
         return register_config["label"]
     return REGISTER_LABELS.get(register, register)
 
+def is_export_register(register):
+    """Return True for solar/export registers such as B1."""
+    if not register:
+        return False
+    return register.upper().startswith("B1")
 
 # ---------------------------------------------------------------------------
 # FORMATTING HELPERS
@@ -202,6 +207,8 @@ def apply_tariff(records, tariff, register_filter=None):
       monthly: dict of 'YYYY-MM' -> {kwh, cost}
       supply_charge_total: float
     """
+    export_register = is_export_register(register_filter)
+
     detail = []
     summary = defaultdict(lambda: {"kwh": 0.0, "cost": 0.0, "intervals": 0})
     daily = defaultdict(lambda: {"kwh": 0.0, "cost": 0.0})
@@ -213,6 +220,9 @@ def apply_tariff(records, tariff, register_filter=None):
 
         period_name, rate = classify_interval(r["date"], r["time"], tariff)
         cost = r["kwh"] * rate
+        if export_register:
+            # Solar/export feed-in: cost is a credit (negative).
+            cost = -abs(cost)
 
         row = dict(r)
         row["period"] = period_name
@@ -295,9 +305,13 @@ def _parse_timestamp(s):
     s = s.strip()
     formats = [
         "%d/%m/%Y %I:%M:%S %p",
+        "%d/%m/%Y %I:%M %p",
         "%d/%m/%Y %H:%M:%S",
+        "%d/%m/%Y %H:%M",
         "%Y-%m-%d %H:%M:%S",
         "%Y-%m-%dT%H:%M:%S",
+        "%Y-%m-%d %H:%M",
+        "%Y-%m-%dT%H:%M",
     ]
     for fmt in formats:
         try:
@@ -305,6 +319,7 @@ def _parse_timestamp(s):
         except ValueError:
             continue
     raise ValueError(f"Could not parse timestamp: {s!r}")
+
 
 
 def parse_flat_csv(path):
@@ -599,9 +614,12 @@ def main():
         filtered_dates = sorted({r["date"] for r in detail})
         print(f"\n{'='*60}")
         print(f"Register: {register} — {label}")
+        if is_export_register(register):
+            print("  (export/solar register — costs shown as credits)")
         print(f"{'='*60}")
         print(f"  Intervals used: {fmt_int(len(detail))}")
         print(f"  Days with data: {fmt_int(len(daily))} ({filtered_dates[0]} to {filtered_dates[-1]})")
+
 
         total_kwh, total_cost, supply = print_console_summary(
             register_tariff, summary, monthly, supply_charge_total
