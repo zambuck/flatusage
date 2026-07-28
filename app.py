@@ -677,33 +677,39 @@ def build_weekly_chart(result_files, tariff):
             max_kwh = max(max_kwh, v)
         kwh_series[r] = series
 
-    # Identify export cost categories and flip credits to positive magnitudes.
+    # Build totals from both period costs and supply charges.
     period_totals = defaultdict(float)
+    supply_totals = defaultdict(float)
     for l in labels:
         for p, c in aggregate[l]["period_costs"].items():
             period_totals[p] += c
+        for s, c in aggregate[l]["supply"].items():
+            supply_totals[s] += c
 
-    export_cost_categories = set()
-    for cat in list(period_totals.keys()):
-        if any(cat.startswith(reg + " ") or cat == reg + " supply" for reg in export_registers):
-            export_cost_categories.add(cat)
+    # Export cost categories come from period names only (supply is never a credit).
+    export_cost_categories = {
+        cat for cat in period_totals
+        if any(cat.startswith(reg + " ") or cat == reg + " supply" for reg in export_registers)
+    }
 
-    supply_keys = sorted({k for l in labels for k in aggregate[l]["supply"].keys()})
-    for cat in supply_keys:
-        if any(cat.startswith(reg + " ") or cat == reg + " supply" for reg in export_registers):
-            export_cost_categories.add(cat)
-
-    # Order consumption cost categories by total spend, then export credits.
+    # Order: consumption periods, non-export supply, export periods, export supply.
     consumption_cats = sorted(
         (c for c in period_totals if c not in export_cost_categories),
         key=lambda c: -period_totals[c],
     )
     export_cats = sorted(
-        (c for c in export_cost_categories if c in period_totals),
+        (c for c in export_cost_categories),
         key=lambda c: -abs(period_totals[c]),
     )
-    export_supply_cats = sorted(c for c in export_cost_categories if c in supply_keys)
-    categories = consumption_cats + export_cats + export_supply_cats
+    non_export_supply_cats = sorted(
+        (c for c in supply_totals if c not in export_cost_categories),
+        key=lambda c: -supply_totals[c],
+    )
+    export_supply_cats = sorted(
+        (c for c in supply_totals if c in export_cost_categories),
+        key=lambda c: -abs(supply_totals[c]),
+    )
+    categories = consumption_cats + non_export_supply_cats + export_cats + export_supply_cats
 
     cost_series = {}
     max_cost = 0.0
