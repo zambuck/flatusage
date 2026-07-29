@@ -1,0 +1,19 @@
+plan_name: "Combo with tiered solar"
+registers:
+  E1:
+    label: "General Usage"
+    daily_supply_charge_dollars: 1.20
+    periods:
+      - name: peak
+        days: weekday
+        windows:
+          - start: "4pm"
+            end: "9pm"
+        rate: 0.3844
+    default_rate: 0.3844
+  B1:
+    label: "Solar Export"
+    export_daily_tiers:
+      - up_to_kwh: 8.0
+        rate: 0.08
+      - rate: 0.03
