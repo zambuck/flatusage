@@ -272,7 +272,11 @@ Once your container is running you should be able to connect with port 5000, spe
 
 
 # Visualisations
-The Load Profile shows a heatmap of usage across a week. The coloured overlay indicates the rate in effect for the specified...
+The Load Profile shows a heatmap of usage across a week. The coloured overlay indicates the rate in effect for the specified times.
+<img width="710" height="422" alt="Screenshot 2026-07-28 at 08 24 15" src="https://github.com/user-attachments/assets/cfb78af9-85ed-47c8-8976-34b4059c1530" />
+
+And if solar is being fed in then that'll be indicated along with usage, for at most the latest year.
+<img width="705" height="854" alt="Screenshot 2026-07-28 at 14 35 09" src="https://github.com/user-attachments/assets/37d4d3f5-6da0-4eb2-a74a-8f8bc6ac8a53" />
 
 ## Redact Usage Data
 
